@@ -19,6 +19,9 @@ on:
 jobs:
   guard: # RUN THE GUARD FIRST
     name: Branch Flow Guard Check
+    permissions:
+      pull-requests: write 
+      contents: read
     # Use the correct local path for the reusable workflow
     uses: ./.github/workflows/pr-branch-guard.yml 
     with:
