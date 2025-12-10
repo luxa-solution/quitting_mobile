@@ -12,7 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: write # Needed for PR comments & labels
+      issues: write
+      pull-requests: read
 
     steps:
       - name: Generate Hotfix Propagation SOP
