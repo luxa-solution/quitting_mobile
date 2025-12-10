@@ -9,8 +9,6 @@ on:
 
 permissions:
   contents: read
-  # This is important – admin/rules permission
-  administration: write
 
 jobs:
   sync-rulesets:
