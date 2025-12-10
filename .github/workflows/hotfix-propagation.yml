@@ -1,20 +1,19 @@
 name: Hotfix Propagation
 
 on:
-  pull_request:
-    types: [closed]
+  # Use the 'push' event on the main branch for full permissions
+  push:
     branches:
       - main
 
 jobs:
   create-followup-prs:
-    if: >
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'hotfix/')
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read # Used for the default GITHUB_TOKEN permissions
+      pull-requests: write # This permission will now be honored for PR creation/modification
+      issues: write # Needed for potential commenting, though not strictly used here
+
     steps:
       - name: Create PRs from main → staging & develop
         uses: actions/github-script@v7
@@ -22,17 +21,52 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const { owner, repo } = context.repo;
-            const hotfixBranch = context.payload.pull_request.head.ref;
             const source = 'main';
             const targets = ['staging', 'develop'];
+            const commitSha = context.sha;
 
+            core.info(`Processing push to ${source} with commit: ${commitSha}`);
+
+            // 1. Find the original Pull Request that introduced this merge commit
+            const { data: pullRequests } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner,
+              repo,
+              commit_sha: commitSha,
+            });
+
+            if (pullRequests.length === 0) {
+              core.info(`No PR found for commit ${commitSha}. Assuming direct push or unrelated merge. Exiting gracefully.`);
+              return;
+            }
+
+            // The PR is the one that was just merged into 'main'
+            const mergedPr = pullRequests.find(pr => pr.state === 'closed' && pr.merged_at);
+
+            if (!mergedPr) {
+              core.info(`PR found, but not recently merged. Exiting gracefully.`);
+              return;
+            }
+
+            const hotfixBranch = mergedPr.head.ref;
+            const originalPrTitle = mergedPr.title;
+            
+            // 2. Check if the source branch is truly a hotfix branch
+            if (!hotfixBranch.startsWith('hotfix/')) {
+              core.info(`Source branch '${hotfixBranch}' is not a hotfix branch. Propagation is not required. Exiting gracefully.`);
+              return;
+            }
+
+            // Branch check passed. Proceed with propagation.
+            core.info(`Hotfix branch '${hotfixBranch}' merged. Creating propagation PRs...`);
+
+            // 3. Create propagation PRs for target branches
             for (const base of targets) {
               // Check if a PR already exists main -> base
               const { data: existing } = await github.rest.pulls.list({
                 owner,
                 repo,
                 state: 'open',
-                head: `${owner}:${source}`,
+                head: `${owner}:${source}`, // head is 'main'
                 base,
               });
 
@@ -41,21 +75,31 @@ jobs:
                 continue;
               }
 
-              const title = `Merge hotfix ${hotfixBranch} into ${base}`;
+              // Use the original PR title as requested
+              const title = originalPrTitle; 
+              
               const body = [
-                `This PR brings hotfix \`${hotfixBranch}\` into \`${base}\`.`,
+                `This PR propagates the hotfix merge from \`main\` into \`${base}\`.`,
                 '',
-                'Hotfix was merged into `main` and should be propagated here.',
+                `The original hotfix PR was: #${mergedPr.number}.`,
+                `Source branch: \`${hotfixBranch}\`.`,
+                '',
+                'Please review and merge to keep the branches in sync.'
               ].join('\n');
 
-              const { data: pr } = await github.rest.pulls.create({
-                owner,
-                repo,
-                head: source,
-                base,
-                title,
-                body,
-              });
-
-              core.info(`Created PR #${pr.number} from ${source} to ${base}`);
+              try {
+                  const { data: pr } = await github.rest.pulls.create({
+                    owner,
+                    repo,
+                    head: source, // Source branch is 'main'
+                    base,         // Target branch is 'staging' or 'develop'
+                    title,
+                    body,
+                  });
+    
+                  core.info(`Created propagation PR #${pr.number} from ${source} to ${base}`);
+              } catch (e) {
+                  // Catch and log API errors (e.g., merge conflicts)
+                  core.warning(`Failed to create PR from ${source} to ${base}: ${e.message}`);
+              }
             }
