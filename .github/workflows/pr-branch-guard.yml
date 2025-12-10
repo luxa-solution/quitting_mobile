@@ -16,10 +16,6 @@ on:
         required: true
         type: number
         description: The number of the Pull Request
-    secrets:
-      GITHUB_TOKEN:
-        required: true
-        description: The GitHub Token for interaction
 
 permissions:
   contents: read

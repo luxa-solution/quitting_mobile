@@ -23,7 +23,6 @@ jobs:
       head_ref: ${{ github.head_ref }}
       base_ref: ${{ github.base_ref }}
       pr_number: ${{ github.event.pull_request.number }}
-    secrets: inherit
 
   performance-metrics:
     name: React Native Performance

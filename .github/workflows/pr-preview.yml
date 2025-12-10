@@ -16,7 +16,6 @@ jobs:
       head_ref: ${{ github.head_ref }}
       base_ref: ${{ github.base_ref }}
       pr_number: ${{ github.event.pull_request.number }}
-    secrets: inherit
 
   preview:
     name: Build Preview & Comment
