@@ -12,10 +12,10 @@ on:
           - preview
           - production
   # FIXED: Changed from workflow_run to pull_request for proper PR integration
-  pull_request:
-    types: [opened, synchronize, reopened]
-    branches:
-      - develop
+# pull_request: # Only allow manual execution via workflow_dispatch
+#   types: [opened, synchronize, reopened]
+#   branches:
+#     - develop
 
 jobs:
   build-android:
@@ -23,8 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
-      issues: write
+#      pull-requests: write # Not needed for manual-only execution
+#      issues: write # Not needed for manual-only execution
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -73,7 +73,8 @@ jobs:
 
       - name: Create keystore (Development only)
         # FIXED: Check for pull_request event instead of branch name
-        if: github.event.inputs.build_type == 'development' || github.event_name == 'pull_request'
+        # Removed '|| github.event_name == 'pull_request'' for manual-only trigger
+        if: github.event.inputs.build_type == 'development'
         run: |
           cd android/app
           keytool -genkeypair -v -storetype PKCS12 \
@@ -85,7 +86,8 @@ jobs:
 
       - name: Build Android APK (Debug)
         # FIXED: Check for pull_request event
-        if: github.event.inputs.build_type == 'development' || github.event_name == 'pull_request'
+        # Removed '|| github.event_name == 'pull_request'' for manual-only trigger
+        if: github.event.inputs.build_type == 'development'
         run: |
           cd android
           ./gradlew assembleDebug --no-daemon
@@ -137,74 +139,74 @@ jobs:
             android/app/build/outputs/apk/**/*.apk
           retention-days: 30
 
-      - name: Comment PR with download link
-        # FIXED: Only comment on pull_request events
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const version = '${{ steps.version.outputs.version }}';
-            const sha = '${{ github.sha }}'.substring(0, 7);
-
-            const comment = `## 📦 Android Build Ready!
-
-            ### Build Information
-            - **Version**: ${version}
-            - **Commit**: ${sha}
-            - **Branch**: ${{ github.head_ref }}
-            - **Build Type**: ${{ github.event.inputs.build_type || 'debug' }}
-
-            ### 📥 Download APK
-            The APK is available in the workflow artifacts. To download:
-            1. Go to the [Actions tab](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            2. Scroll to "Artifacts" section
-            3. Download \`android-apk-${{ github.sha }}\`
-
-            ### 📲 Installation
-            1. Download the APK file
-            2. Transfer to your Android device
-            3. Enable "Install from Unknown Sources" in Settings
-            4. Open the APK file to install
-
-            ---
-            *Built without EAS credits! 🎉*`;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && 
-              comment.body.includes('Android Build Ready')
-            );
-
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: comment
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: comment
-              });
-            }
+#      - name: Comment PR with download link # Removed for manual-only execution
+#        # FIXED: Only comment on pull_request events
+#        if: github.event_name == 'pull_request'
+#        uses: actions/github-script@v7
+#        with:
+#          github-token: ${{ secrets.GITHUB_TOKEN }}
+#          script: |
+#            const fs = require('fs');
+#            const version = '${{ steps.version.outputs.version }}';
+#            const sha = '${{ github.sha }}'.substring(0, 7);
+#
+#            const comment = `## 📦 Android Build Ready!
+#
+#            ### Build Information
+#            - **Version**: ${version}
+#            - **Commit**: ${sha}
+#            - **Branch**: ${{ github.head_ref }}
+#            - **Build Type**: ${{ github.event.inputs.build_type || 'debug' }}
+#
+#            ### 📥 Download APK
+#            The APK is available in the workflow artifacts. To download:
+#            1. Go to the [Actions tab](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+#            2. Scroll to "Artifacts" section
+#            3. Download \`android-apk-${{ github.sha }}\`
+#
+#            ### 📲 Installation
+#            1. Download the APK file
+#            2. Transfer to your Android device
+#            3. Enable "Install from Unknown Sources" in Settings
+#            4. Open the APK file to install
+#
+#            ---
+#            *Built without EAS credits! 🎉*`;
+#
+#            const { data: comments } = await github.rest.issues.listComments({
+#              owner: context.repo.owner,
+#              repo: context.repo.repo,
+#              issue_number: context.issue.number,
+#            });
+#
+#            const botComment = comments.find(comment => 
+#              comment.user.type === 'Bot' && 
+#              comment.body.includes('Android Build Ready')
+#            );
+#
+#            if (botComment) {
+#              await github.rest.issues.updateComment({
+#                owner: context.repo.owner,
+#                repo: context.repo.repo,
+#                comment_id: botComment.id,
+#                body: comment
+#              });
+#            } else {
+#              await github.rest.issues.createComment({
+#                owner: context.repo.owner,
+#                repo: context.repo.repo,
+#                issue_number: context.issue.number,
+#                body: comment
+#              });
+#            }
 
   build-ios:
     name: Build iOS IPA
     runs-on: macos-14
     permissions:
       contents: read
-      pull-requests: write
-      issues: write
+#      pull-requests: write # Not needed for manual-only execution
+#      issues: write # Not needed for manual-only execution
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -260,7 +262,8 @@ jobs:
 
       - name: Build iOS app (Debug)
         # FIXED: Check for pull_request event
-        if: github.event.inputs.build_type == 'development' || github.event_name == 'pull_request'
+        # Removed '|| github.event_name == 'pull_request'' for manual-only trigger
+        if: github.event.inputs.build_type == 'development'
         run: |
           cd ios
           xcodebuild -workspace *.xcworkspace \
@@ -303,7 +306,8 @@ jobs:
 
       - name: Upload IPA artifact
         # FIXED: Check for pull_request event
-        if: github.event.inputs.build_type != 'development' && github.event_name != 'pull_request'
+        # Removed '&& github.event_name != 'pull_request'' for manual-only trigger
+        if: github.event.inputs.build_type != 'development'
         uses: actions/upload-artifact@v4
         with:
           name: ios-ipa-${{ github.sha }}
@@ -313,7 +317,8 @@ jobs:
 
       - name: Upload iOS build artifact (Simulator)
         # FIXED: Check for pull_request event
-        if: github.event.inputs.build_type == 'development' || github.event_name == 'pull_request'
+        # Removed '|| github.event_name == 'pull_request'' for manual-only trigger
+        if: github.event.inputs.build_type == 'development'
         uses: actions/upload-artifact@v4
         with:
           name: ios-simulator-${{ github.sha }}
@@ -321,62 +326,62 @@ jobs:
             ios/build/Build/Products/Debug-iphonesimulator/*.app
           retention-days: 30
 
-      - name: Comment PR with download link
-        # FIXED: Only comment on pull_request events
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const version = '${{ steps.version.outputs.version }}';
-            const sha = '${{ github.sha }}'.substring(0, 7);
-            const buildType = '${{ github.event.inputs.build_type || 'debug' }}';
-
-            const comment = `## 📦 iOS Build Ready!
-
-            ### Build Information
-            - **Version**: ${version}
-            - **Commit**: ${sha}
-            - **Branch**: ${{ github.head_ref }}
-            - **Build Type**: ${buildType}
-
-            ### 📥 Download IPA
-            The IPA is available in the workflow artifacts. To download:
-            1. Go to the [Actions tab](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            2. Scroll to "Artifacts" section
-            3. Download \`ios-${buildType === 'development' ? 'simulator' : 'ipa'}-${{ github.sha }}\`
-
-            ### 📲 Installation
-            ${buildType === 'development' ? 
-              '**Simulator Build**: Extract and drag the .app file to your iOS Simulator' :
-              '**Device Build**: Install via TestFlight or use tools like AltStore/Sideloadly'}
-
-            ---
-            *Built without EAS credits! 🎉*`;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && 
-              comment.body.includes('iOS Build Ready')
-            );
-
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: comment
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: comment
-              });
-            }
+#      - name: Comment PR with download link # Removed for manual-only execution
+#        # FIXED: Only comment on pull_request events
+#        if: github.event_name == 'pull_request'
+#        uses: actions/github-script@v7
+#        with:
+#          github-token: ${{ secrets.GITHUB_TOKEN }}
+#          script: |
+#            const version = '${{ steps.version.outputs.version }}';
+#            const sha = '${{ github.sha }}'.substring(0, 7);
+#            const buildType = '${{ github.event.inputs.build_type || 'debug' }}';
+#
+#            const comment = `## 📦 iOS Build Ready!
+#
+#            ### Build Information
+#            - **Version**: ${version}
+#            - **Commit**: ${sha}
+#            - **Branch**: ${{ github.head_ref }}
+#            - **Build Type**: ${buildType}
+#
+#            ### 📥 Download IPA
+#            The IPA is available in the workflow artifacts. To download:
+#            1. Go to the [Actions tab](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+#            2. Scroll to "Artifacts" section
+#            3. Download \`ios-${buildType === 'development' ? 'simulator' : 'ipa'}-${{ github.sha }}\`
+#
+#            ### 📲 Installation
+#            ${buildType === 'development' ? 
+#              '**Simulator Build**: Extract and drag the .app file to your iOS Simulator' :
+#              '**Device Build**: Install via TestFlight or use tools like AltStore/Sideloadly'}
+#
+#            ---
+#            *Built without EAS credits! 🎉*`;
+#
+#            const { data: comments } = await github.rest.issues.listComments({
+#              owner: context.repo.owner,
+#              repo: context.repo.repo,
+#              issue_number: context.issue.number,
+#            });
+#
+#            const botComment = comments.find(comment => 
+#              comment.user.type === 'Bot' && 
+#              comment.body.includes('iOS Build Ready')
+#            );
+#
+#            if (botComment) {
+#              await github.rest.issues.updateComment({
+#                owner: context.repo.owner,
+#                repo: context.repo.repo,
+#                comment_id: botComment.id,
+#                body: comment
+#              });
+#            } else {
+#              await github.rest.issues.createComment({
+#                owner: context.repo.owner,
+#                repo: context.repo.repo,
+#                issue_number: context.issue.number,
+#                body: comment
+#              });
+#            }
