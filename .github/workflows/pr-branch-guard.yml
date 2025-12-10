@@ -21,8 +21,6 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const core = require('@actions/core');
-
             const pr = context.payload.pull_request;
             const base = pr.base.ref; // target branch
             const head = pr.head.ref; // source branch
