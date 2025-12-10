@@ -1,0 +1,125 @@
+# .github/workflows/hotfix-propagation-notifier.yml
+
+name: Hotfix Propagation Notifier
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main 
+
+jobs:
+  generate_sop:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write 
+
+    steps:
+      - name: Generate and Post Custom SOP
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            
+            const hotfixBranch = pr.head.ref;
+            const originalPrNumber = pr.number;
+            
+            if (!hotfixBranch.startsWith('hotfix/')) {
+              core.info(`Source branch '${hotfixBranch}' is not a hotfix branch. Exiting gracefully.`);
+              return;
+            }
+
+            core.info(`Hotfix PR #${originalPrNumber} merged. Generating custom SOP...`);
+
+            // --- Define Dynamic Variables ---
+            const hotfixBaseName = hotfixBranch.split('/').pop();
+            const backportBranchStaging = `backport/${hotfixBaseName}-to-staging`;
+            const backportBranchDevelop = `backport/${hotfixBaseName}-to-develop`;
+            const repoUrl = `https://github.com/${owner}/${repo}`;
+            
+            // --- 1. Initial Setup Block (Clean string concatenation) ---
+            const block1 = [
+              "### 1. Initial Setup",
+              "```bash",
+              "# Ensure local 'main' is synchronized with the recent merge",
+              "git checkout main",
+              "git pull origin main",
+              "```",
+            ].join('\n');
+            
+            // --- 2. Staging Backport Block ---
+            const block2 = [
+              "### 2. Backport to STAGING (Create PR Branch)",
+              "*NOTE: This step is optional if staging was already merged to main post-hotfix.*",
+              "```bash",
+              "git checkout staging",
+              "git pull origin staging",
+              `git checkout -b ${backportBranchStaging}`,
+              `git merge ${hotfixBranch} # Merge the original hotfix branch`,
+              `git push origin ${backportBranchStaging}`,
+              "```",
+              `➡️ [Open PR on GitHub: \`${backportBranchStaging} \u2192 staging\`](\${repoUrl}/compare/staging...${backportBranchStaging})`,
+            ].join('\n');
+
+
+            // --- 3. Develop Backport Block ---
+            const block3 = [
+              "### 3. Backport to DEVELOP (Create PR Branch)",
+              "```bash",
+              "git checkout develop",
+              "git pull origin develop",
+              `git checkout -b ${backportBranchDevelop}`,
+              `git merge ${hotfixBranch} # Merge the original hotfix branch`,
+              `git push origin ${backportBranchDevelop}`,
+              "```",
+              `➡️ [Open PR on GitHub: \`${backportBranchDevelop} \u2192 develop\`](\${repoUrl}/compare/develop...${backportBranchDevelop})`,
+            ].join('\n');
+            
+            // --- 4. Cleanup Block ---
+            const block4 = [
+              "### 4. Cleanup (Only after ALL backport PRs are merged!)",
+              "*Do not run these commands until PRs from Steps 2 & 3 are fully merged.*",
+              "```bash",
+              `# Delete local hotfix branch`,
+              `git branch -D ${hotfixBranch} `,
+              "",
+              `# Delete remote hotfix branch`,
+              `git push origin :${hotfixBranch} `,
+              "",
+              "# Delete backport branches via the GitHub UI after merging.",
+              "```",
+            ].join('\n');
+            
+            // --- 5. The Safety Caveat Block ---
+            const caveat = [
+              "---",
+              "### ⚠️ IMPORTANT SAFETY CAVEAT",
+              "These commands are automatically generated based on the Git flow model.",
+              "**Always** inspect the output of `git merge` for conflicts, and **verify the branch names** before running the `git push` or cleanup commands.",
+            ].join('\n');
+            
+            // --- Combine all blocks into the final message (using double newline for separation) ---
+            const message = [
+              `## 📢 Hotfix Propagation SOP: \`${hotfixBranch}\``,
+              `The hotfix from \`${hotfixBranch}\` has been merged into \`main\`. Please run the following steps to propagate the fix to lower branches.`,
+              '---',
+              block1,
+              block2,
+              block3,
+              block4,
+              caveat
+            ].join('\n\n');
+
+            // 3. Post the comment on the original hotfix PR
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: originalPrNumber,
+              body: message,
+            });
+
+            core.info(`Successfully posted customized SOP on PR #${originalPrNumber}.`);
