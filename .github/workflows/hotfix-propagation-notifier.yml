@@ -7,13 +7,17 @@ on:
     branches:
       - main # Trigger when main receives new commits (from merges)
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   generate_sop:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: write
-      pull-requests: read
 
     steps:
       - name: Generate Hotfix Propagation SOP
