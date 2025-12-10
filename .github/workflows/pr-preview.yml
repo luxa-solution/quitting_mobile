@@ -1,13 +1,21 @@
-# .github/workflows/pr-preview.yml
 name: PR Preview
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  workflow_run:
+    workflows: ["PR Branch Guard"]
+    types:
+      - completed
 
 jobs:
   preview:
     name: Build Preview & Comment
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.pull_requests[0].base.ref == 'develop' &&
+      (
+        startsWith(github.event.workflow_run.pull_requests[0].head.ref, 'feature/') ||
+        startsWith(github.event.workflow_run.pull_requests[0].head.ref, 'bugfix/')
+      )
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -15,6 +23,34 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # FIXED: Checkout the correct SHA from the workflow_run event
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Get PR number
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // FIXED: workflow_run doesn't have direct PR context, so we need to query for it
+            const { data: pullRequests } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${context.repo.owner}:${context.payload.workflow_run.head_branch}`
+            });
+            
+            if (pullRequests.length === 0) {
+              core.setFailed('No open PR found for this branch');
+              return;
+            }
+            
+            const prNumber = pullRequests[0].number;
+            const prTitle = pullRequests[0].title;
+            core.setOutput('number', prNumber);
+            core.setOutput('title', prTitle);
+            core.info(`Found PR #${prNumber}: ${prTitle}`);
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -50,8 +86,8 @@ jobs:
       - name: Create EAS Update for PR
         id: eas-update
         run: |
-          BRANCH_NAME="pr-${{ github.event.pull_request.number }}"
-          eas update --branch $BRANCH_NAME --message "PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}" --non-interactive
+          BRANCH_NAME="pr-${{ steps.pr.outputs.number }}"
+          eas update --branch $BRANCH_NAME --message "PR #${{ steps.pr.outputs.number }}: ${{ steps.pr.outputs.title }}" --non-interactive
           echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
       - name: Generate QR Codes
@@ -72,6 +108,8 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            // FIXED: Use the PR number we fetched earlier
+            const prNumber = parseInt('${{ steps.pr.outputs.number }}');
             const branch = '${{ steps.eas-update.outputs.branch }}';
             const iosUrl = '${{ steps.qr.outputs.ios_url }}';
             const androidUrl = '${{ steps.qr.outputs.android_url }}';
@@ -100,7 +138,7 @@ jobs:
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
+              issue_number: prNumber,
             });
 
             const botComment = comments.find(comment => 
@@ -121,7 +159,7 @@ jobs:
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number,
+                issue_number: prNumber,
                 body: comment
               });
             }
