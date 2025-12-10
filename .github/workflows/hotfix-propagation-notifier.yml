@@ -2,8 +2,8 @@
 
 name: Hotfix Propagation Notifier
 
-# This trigger runs *after* the PR is closed (merged) and provides high privilege
-# to the token, which is necessary for reliably commenting on a closed PR.
+# Permissions must be declared here to ensure the default GITHUB_TOKEN has the 
+# necessary write access for labeling and commenting on the closed PR.
 permissions:
   contents: read
   issues: write # Required for adding labels and posting comments
@@ -11,14 +11,14 @@ permissions:
 
 on:
   pull_request_target:
-    types: [closed]
-    branches:
-      - main # Only run when PR targets and merges into main
+    types: [closed] # Triggers when the PR is closed (merged or not)
+    # CRITICAL: We remove the 'branches' filter here to ensure the PR payload is delivered.
 
 jobs:
   generate_sop:
-    # Only runs if the pull request was merged (not just closed without merging)
-    if: github.event.pull_request.merged == true
+    # CRITICAL IF: Only run if the PR was merged AND targeted 'main'.
+    # This prevents running on PRs targeting other branches or PRs closed without merging.
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
 
     steps:
@@ -29,26 +29,22 @@ jobs:
 
           script: |
             const { owner, repo } = context.repo;
-            const pr = github.event.pull_request;
+            const pr = context.payload.pull_request; // <-- Correct and reliable payload access
 
+            // The IF check ensures these are never undefined:
             const prNumber = pr.number;
             const hotfixBranch = pr.head.ref;
             const baseBranch = pr.base.ref;
 
             core.info(`Processing merged PR #${prNumber}`);
             
-            // --- 1. Validation (Ensure correct base and hotfix branch name) ---
-            if (baseBranch !== "main") {
-              core.info(`PR merged into '${baseBranch}', not main. Exiting.`);
-              return;
-            }
-
+            // --- 1. Validation (Must be hotfix/* branch) ---
             if (!hotfixBranch.startsWith("hotfix/")) {
-              core.info(`Not a hotfix PR (${hotfixBranch}). Exiting.`);
+              core.info(`PR head '${hotfixBranch}' is not hotfix/* — exiting.`);
               return;
             }
 
-            core.info(`Hotfix PR confirmed: ${hotfixBranch}`);
+            core.info(`Confirmed hotfix PR: ${hotfixBranch}`);
 
             // --- 2. Label PR (Tracking) ---
             try {
@@ -58,18 +54,18 @@ jobs:
                 issue_number: prNumber,
                 labels: ["needs-backport"],
               });
-              core.info(`Label 'needs-backport' applied.`);
+              core.info(`Applied label 'needs-backport'.`);
             } catch (err) {
               core.warning(`Failed to apply label: ${err.message}`);
             }
 
-            // --- 3. Build SOP comment variables and checks ---
+            // --- 3. Build SOP data and check existence ---
             const hotfixBase = hotfixBranch.split("/").pop();
             const stagingBackport = `backport/${hotfixBase}-to-staging`;
             const developBackport = `backport/${hotfixBase}-to-develop`;
             const repoUrl = `https://github.com/${owner}/${repo}`;
 
-            // Utility function to check branch existence (remains robust)
+            // Utility function to check branch existence (for generating correct instructions)
             async function branchExists(branch) {
               try {
                 await github.rest.repos.getBranch({ owner, repo, branch });
@@ -120,21 +116,14 @@ jobs:
 
             // --- 4. Assemble Final Message Blocks ---
             
-            const blockSetup = [
-              "### 🔧 1. Sync Local Main",
-              "```bash",
-              "git checkout main",
-              "git pull origin main",
-              "```",
-            ].join('\n');
-            
+            const blockSetup = ["### 🔧 1. Sync Local Main", "```bash", "git checkout main", "git pull origin main", "```"].join('\n');
             const blockStaging = buildBackportBlock("STAGING", stagingBackport, stagingExists);
             const blockDevelop = buildBackportBlock("DEVELOP", developBackport, developExists);
 
             const blockCleanup = [
               "### 🧹 4. Cleanup (AFTER all backports merge)",
               "<details>",
-              "<summary>Remove leftover branches safely</summary>",
+              "<summary>Remove hotfix branches safely</summary>",
               "",
               "```bash",
               `git branch -D ${hotfixBranch}`,
@@ -148,14 +137,14 @@ jobs:
               "---",
               "### ⚠️ Safety Notes",
               "- Resolve merge conflicts carefully.",
-              "- Verify branch names before merging.",
-              "- Do **not** delete the hotfix branch until both backport PRs are merged.",
+              "- Verify base branches before executing commands.",
+              "- Do **not** delete the hotfix branch prematurely.",
             ].join("\n");
 
 
             const sop = [
               `## 🔥 Hotfix Backport SOP for \`${hotfixBranch}\``,
-              `This hotfix PR has been merged into **main**. To complete the propagation flow, you must manually backport it to **staging** and **develop**.`,
+              `This hotfix PR has now been merged into **main**. To complete the propagation flow, you must manually backport it to **staging** and **develop**.`,
               "---",
               blockSetup,
               blockStaging,
@@ -164,12 +153,16 @@ jobs:
               caveat,
             ].join('\n\n');
 
-            // --- 5. Post SOP comment ---
-            await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number: prNumber,
-              body: sop,
-            });
-
-            core.info(`SOP posted on PR #${prNumber}.`);
+            // --- 5. Post SOP comment (Guaranteed to work due to pull_request_target) ---
+            try {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: sop,
+              });
+              core.info(`SOP posted on PR #${prNumber}.`);
+            } catch (err) {
+              core.error(`Failed to post SOP comment: ${err.message}`);
+              throw err;
+            }
