@@ -1,0 +1,61 @@
+name: Hotfix Propagation
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  create-followup-prs:
+    if: >
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'hotfix/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Create PRs from main → staging & develop
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const hotfixBranch = context.payload.pull_request.head.ref;
+            const source = 'main';
+            const targets = ['staging', 'develop'];
+
+            for (const base of targets) {
+              // Check if a PR already exists main -> base
+              const { data: existing } = await github.rest.pulls.list({
+                owner,
+                repo,
+                state: 'open',
+                head: `${owner}:${source}`,
+                base,
+              });
+
+              if (existing.length > 0) {
+                core.info(`PR from ${source} to ${base} already exists, skipping.`);
+                continue;
+              }
+
+              const title = `Merge hotfix ${hotfixBranch} into ${base}`;
+              const body = [
+                `This PR brings hotfix \`${hotfixBranch}\` into \`${base}\`.`,
+                '',
+                'Hotfix was merged into `main` and should be propagated here.',
+              ].join('\n');
+
+              const { data: pr } = await github.rest.pulls.create({
+                owner,
+                repo,
+                head: source,
+                base,
+                title,
+                body,
+              });
+
+              core.info(`Created PR #${pr.number} from ${source} to ${base}`);
+            }
