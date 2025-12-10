@@ -2,10 +2,6 @@
 name: Build APK/IPA (No EAS)
 
 on:
-  push:
-    branches: [develop, staging]
-  pull_request:
-    branches: [main, develop]
   workflow_dispatch:
     inputs:
       build_type:
