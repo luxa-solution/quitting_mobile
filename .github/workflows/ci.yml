@@ -1,4 +1,3 @@
-# .github/workflows/ci.yml
 name: CI
 
 on:
@@ -10,23 +9,38 @@ on:
       - 'feature/*'
       - 'bugfix/*'
       - 'hotfix/*'
-  workflow_run:
-    workflows: ["PR Branch Guard"]
-    types:
-      - completed
-
+  pull_request: # Trigger directly on PR events for visible checks
+    types: [opened, synchronize, reopened]
+    branches:
+      - develop
+      - staging
+      - main
 
 jobs:
+  guard: # RUN THE GUARD FIRST
+    name: Branch Flow Guard Check
+    permissions:
+      pull-requests: write 
+      contents: read
+    # Use the correct local path for the reusable workflow
+    uses: ./.github/workflows/pr-branch-guard.yml 
+    with:
+      head_ref: ${{ github.head_ref }}
+      base_ref: ${{ github.base_ref }}
+      pr_number: ${{ github.event.pull_request.number || 0 }}
+      event_name: ${{ github.event_name }}
+
   lint:
     name: Lint & Type Check
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: guard # Depends on the guard check
+    if: needs.guard.result == 'success' # Check job result
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.ref }} # Use github.ref for push/PR
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -60,14 +74,15 @@ jobs:
 
   test:
     name: Run Tests
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: guard # Depends on the guard check
+    if: needs.guard.result == 'success' # Check job result
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.ref }} # Use github.ref for push/PR
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -105,14 +120,15 @@ jobs:
 
   build:
     name: Build App
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: guard # Depends on the guard check
+    if: needs.guard.result == 'success' # Check job result
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.ref }} # Use github.ref for push/PR
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -149,29 +165,30 @@ jobs:
 
   security:
     name: Security Audit
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: guard # Depends on the guard check
+    if: needs.guard.result == 'success' # Check job result
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.ref }} # Use github.ref for push/PR
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
       
-      - name: Setup pnpm  # <-- ADD
+      - name: Setup pnpm  
         uses: pnpm/action-setup@v3
 
-      - name: Get pnpm store directory  # <-- ADD
+      - name: Get pnpm store directory 
         id: pnpm-cache
         shell: bash
         run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
 
-      - name: Setup pnpm cache  # <-- ADD
+      - name: Setup pnpm cache 
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
@@ -179,7 +196,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Install dependencies  # <-- ADD
+      - name: Install dependencies  
         run: pnpm install --frozen-lockfile
 
       - name: Run npm audit

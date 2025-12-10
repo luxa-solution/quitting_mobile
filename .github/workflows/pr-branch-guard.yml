@@ -1,32 +1,46 @@
+# .github/workflows/pr-branch-guard.yml
 name: PR Branch Guard
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
-    branches:
-      - main
-      - staging
-      - develop
+  workflow_call:
+    inputs:
+      head_ref:
+        required: true
+        type: string
+        description: The source branch name (e.g., feature/xyz)
+      base_ref:
+        required: true
+        type: string
+        description: The target branch name (e.g., develop)
+      pr_number:
+        required: true
+        type: number
+        description: The number of the Pull Request (use 0 if not a PR)
+      event_name: 
+        required: true
+        type: string
+        description: The GitHub event that triggered the workflow
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: write 
 
 jobs:
   guard:
     runs-on: ubuntu-latest
     steps:
-      - name: Enforce branch flow rules
+      - name: Enforce PR Branch Flow Rules
+        # Runs ONLY on PR events to check head -> base relationship and perform PR actions.
+        if: ${{ inputs.event_name == 'pull_request' }}
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const pr = context.payload.pull_request;
-            const base = pr.base.ref; // target branch
-            const head = pr.head.ref; // source branch
-            const prNumber = pr.number;
+            const base = '${{ inputs.base_ref }}'; // target branch
+            const head = '${{ inputs.head_ref }}'; // source branch
+            const prNumber = ${{ inputs.pr_number }};
 
-            core.info(`Checking PR #${prNumber}: ${head} -> ${base}`);
+            core.info(`Branch Guard: checking PR #${prNumber}: ${head} -> ${base}`);
 
             // Helper: does head start with any prefix in list?
             const startsWithOneOf = (branch, prefixes) =>
@@ -39,7 +53,7 @@ jobs:
               // main: only from staging, hotfix/*, release/*
               allowed =
                 head === 'staging' ||
-                head === 'release' ||                  // in case you ever use a plain 'release' branch
+                head === 'release' ||               
                 head.startsWith('hotfix/') ||
                 head.startsWith('release/');
 
@@ -52,14 +66,15 @@ jobs:
 
             } else if (base === 'staging') {
               // staging: only from develop
-              allowed = head === 'develop';
+              allowed = head === 'develop' || head.startsWith('backport/');
               explanation = [
                 'Allowed PR sources into `staging`:',
-                '- `develop`',
+                '- `develop` (Standard Integration Flow)',
+                '- `backport/*` (Hotfix Propagation)',
               ].join('\n');
 
             } else if (base === 'develop') {
-              // develop: from feature/*, bugfix/*, hotfix/*, release/*, refactor/*, docs/*, test/*, chore/*
+              // develop: feature/*, bugfix/*, hotfix/*, release/*, refactor/*, docs/*, test/*, chore/*
               const allowedPrefixes = [
                 'feature/',
                 'bugfix/',
@@ -69,6 +84,7 @@ jobs:
                 'docs/',
                 'test/',
                 'chore/',
+                'backport/',
               ];
 
               allowed = startsWithOneOf(head, allowedPrefixes);
@@ -83,12 +99,10 @@ jobs:
                 '- `docs/*`',
                 '- `test/*`',
                 '- `chore/*`',
+                '- `backport/*` (Hotfix Propagation)'
               ].join('\n');
-            }
-
-            // For other target branches, we don't enforce anything
-            if (base !== 'main' && base !== 'staging' && base !== 'develop') {
-              core.info(`No branch rules defined for target "${base}", skipping.`);
+            } else {
+              core.info(`Branch Guard: no rules defined for target "${base}", skipping validation.`);
               return;
             }
 
@@ -106,15 +120,14 @@ jobs:
                 '> Please re-open a PR from an allowed source branch for this target.',
               ].join('\n');
 
-              // Comment on the PR
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
                 body: message,
               });
-
-              // Option 1: Auto-close the PR
+              
+              // Auto-close the PR to prevent merge
               await github.rest.pulls.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -124,5 +137,10 @@ jobs:
 
               core.setFailed(`Disallowed PR: ${head} -> ${base}`);
             } else {
-              core.info(`PR #${prNumber}: ${head} -> ${base} is allowed ✅`);
+              core.info(`Branch Guard: PR #${prNumber}: ${head} -> ${base} is allowed ✅`);
             }
+      
+      - name: Allow non-PR events to succeed
+        # This step runs ONLY on non-PR events (push, dispatch, schedule) to ensure the job result is 'success'
+        if: ${{ inputs.event_name != 'pull_request' }}
+        run: echo "Event ${{ inputs.event_name }} is not a Pull Request, allowing downstream jobs to proceed."
