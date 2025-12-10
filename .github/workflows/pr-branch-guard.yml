@@ -1,16 +1,29 @@
 name: PR Branch Guard
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
-    branches:
-      - main
-      - staging
-      - develop
+  # This makes the workflow reusable
+  workflow_call:
+    inputs:
+      head_ref:
+        required: true
+        type: string
+        description: The source branch name (e.g., feature/xyz)
+      base_ref:
+        required: true
+        type: string
+        description: The target branch name (e.g., develop)
+      pr_number:
+        required: true
+        type: number
+        description: The number of the Pull Request
+    secrets:
+      GITHUB_TOKEN:
+        required: true
+        description: The GitHub Token for interaction
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: write # Needed for commenting and closing the PR
 
 jobs:
   guard:
@@ -21,12 +34,11 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const pr = context.payload.pull_request;
-            const base = pr.base.ref; // target branch
-            const head = pr.head.ref; // source branch
-            const prNumber = pr.number;
+            const base = '${{ inputs.base_ref }}'; // target branch
+            const head = '${{ inputs.head_ref }}'; // source branch
+            const prNumber = ${{ inputs.pr_number }};
 
-            core.info(`Checking PR #${prNumber}: ${head} -> ${base}`);
+            core.info(`Branch Guard: checking PR #${prNumber}: ${head} -> ${base}`);
 
             // Helper: does head start with any prefix in list?
             const startsWithOneOf = (branch, prefixes) =>
@@ -39,7 +51,7 @@ jobs:
               // main: only from staging, hotfix/*, release/*
               allowed =
                 head === 'staging' ||
-                head === 'release' ||                  // in case you ever use a plain 'release' branch
+                head === 'release' ||               
                 head.startsWith('hotfix/') ||
                 head.startsWith('release/');
 
@@ -59,7 +71,7 @@ jobs:
               ].join('\n');
 
             } else if (base === 'develop') {
-              // develop: from feature/*, bugfix/*, hotfix/*, release/*, refactor/*, docs/*, test/*, chore/*
+              // develop: feature/*, bugfix/*, hotfix/*, release/*, refactor/*, docs/*, test/*, chore/*
               const allowedPrefixes = [
                 'feature/',
                 'bugfix/',
@@ -84,11 +96,8 @@ jobs:
                 '- `test/*`',
                 '- `chore/*`',
               ].join('\n');
-            }
-
-            // For other target branches, we don't enforce anything
-            if (base !== 'main' && base !== 'staging' && base !== 'develop') {
-              core.info(`No branch rules defined for target "${base}", skipping.`);
+            } else {
+              core.info(`Branch Guard: no rules defined for target "${base}", skipping.`);
               return;
             }
 
@@ -106,15 +115,14 @@ jobs:
                 '> Please re-open a PR from an allowed source branch for this target.',
               ].join('\n');
 
-              // Comment on the PR
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
                 body: message,
               });
-
-              // Option 1: Auto-close the PR
+              
+              // RE-ADDED: Auto-close the PR to prevent merge
               await github.rest.pulls.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -124,5 +132,5 @@ jobs:
 
               core.setFailed(`Disallowed PR: ${head} -> ${base}`);
             } else {
-              core.info(`PR #${prNumber}: ${head} -> ${base} is allowed ✅`);
+              core.info(`Branch Guard: PR #${prNumber}: ${head} -> ${base} is allowed ✅`);
             }

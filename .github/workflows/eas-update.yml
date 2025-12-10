@@ -1,4 +1,3 @@
-# .github/workflows/eas-update.yml
 name: EAS Update
 
 on:
