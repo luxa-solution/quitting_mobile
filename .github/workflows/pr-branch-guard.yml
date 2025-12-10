@@ -1,0 +1,130 @@
+name: PR Branch Guard
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches:
+      - main
+      - staging
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce branch flow rules
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const core = require('@actions/core');
+
+            const pr = context.payload.pull_request;
+            const base = pr.base.ref; // target branch
+            const head = pr.head.ref; // source branch
+            const prNumber = pr.number;
+
+            core.info(`Checking PR #${prNumber}: ${head} -> ${base}`);
+
+            // Helper: does head start with any prefix in list?
+            const startsWithOneOf = (branch, prefixes) =>
+              prefixes.some(prefix => branch.startsWith(prefix));
+
+            let allowed = true;
+            let explanation = '';
+
+            if (base === 'main') {
+              // main: only from staging, hotfix/*, release/*
+              allowed =
+                head === 'staging' ||
+                head === 'release' ||                  // in case you ever use a plain 'release' branch
+                head.startsWith('hotfix/') ||
+                head.startsWith('release/');
+
+              explanation = [
+                'Allowed PR sources into `main`:',
+                '- `staging`',
+                '- `hotfix/*`',
+                '- `release/*`',
+              ].join('\n');
+
+            } else if (base === 'staging') {
+              // staging: only from develop
+              allowed = head === 'develop';
+              explanation = [
+                'Allowed PR sources into `staging`:',
+                '- `develop`',
+              ].join('\n');
+
+            } else if (base === 'develop') {
+              // develop: from feature/*, bugfix/*, hotfix/*, release/*, refactor/*, docs/*, test/*, chore/*
+              const allowedPrefixes = [
+                'feature/',
+                'bugfix/',
+                'hotfix/',
+                'release/',
+                'refactor/',
+                'docs/',
+                'test/',
+                'chore/',
+              ];
+
+              allowed = startsWithOneOf(head, allowedPrefixes);
+
+              explanation = [
+                'Allowed PR sources into `develop`:',
+                '- `feature/*`',
+                '- `bugfix/*`',
+                '- `hotfix/*`',
+                '- `release/*`',
+                '- `refactor/*`',
+                '- `docs/*`',
+                '- `test/*`',
+                '- `chore/*`',
+              ].join('\n');
+            }
+
+            // For other target branches, we don't enforce anything
+            if (base !== 'main' && base !== 'staging' && base !== 'develop') {
+              core.info(`No branch rules defined for target "${base}", skipping.`);
+              return;
+            }
+
+            if (!allowed) {
+              const message = [
+                '🚫 **Branch flow violation**',
+                '',
+                `This pull request is not allowed based on the repository branch strategy.`,
+                '',
+                `**From:** \`${head}\``,
+                `**To:** \`${base}\``,
+                '',
+                explanation,
+                '',
+                '> Please re-open a PR from an allowed source branch for this target.',
+              ].join('\n');
+
+              // Comment on the PR
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: message,
+              });
+
+              // Option 1: Auto-close the PR
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                state: 'closed',
+              });
+
+              core.setFailed(`Disallowed PR: ${head} -> ${base}`);
+            } else {
+              core.info(`PR #${prNumber}: ${head} -> ${base} is allowed ✅`);
+            }
