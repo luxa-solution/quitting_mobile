@@ -5,8 +5,6 @@ on:
     workflows: ["PR Branch Guard"]
     types:
       - completed
-    branches:
-      - develop
   push:
     branches: 
       - main
@@ -14,7 +12,12 @@ on:
 jobs:
   analyze-bundle:
     name: Analyze Bundle Size
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    if: >
+      github.event_name != 'workflow_run' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.pull_requests[0].base.ref == 'develop'
+      )
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

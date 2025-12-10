@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - staging
       - develop
       - 'feature/*'
       - 'bugfix/*'
@@ -13,9 +14,6 @@ on:
     workflows: ["PR Branch Guard"]
     types:
       - completed
-    branches:
-      - main
-      - develop
 
 
 jobs:
