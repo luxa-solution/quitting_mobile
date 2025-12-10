@@ -4,23 +4,24 @@ This folder contains the JSON definitions for this repository’s GitHub Ruleset
 
 ⚠️ **Important:**  
 GitHub does **not** read or apply rulesets directly from this folder.  
-The files here are _ignored by GitHub itself_.
-
-A GitHub Action located in `.github/workflows/sync-rulesets.yml` reads these files and uses the
-GitHub API to create or update the actual Rulesets in:  
-**Repository Settings → Rules → Rulesets**
+The files here are _ignored by GitHub itself_ and are stored only for documentation and version control.
 
 ## Why this folder exists
 
-- Version control for Rulesets
+- Version control for all Ruleset configurations
 - Easier code review and collaboration
-- Full history of rule changes
-- Automated synchronization via workflow
+- Clear history of changes to branch protection
+- A single, organized place to store importable ruleset files
 
-## How to update the rules
+## How to update the rulesets
 
-1. Edit the JSON files in this folder.
-2. Commit and merge to the `main` branch.
-3. The workflow automatically updates the live Rulesets in GitHub.
+1. Edit the JSON files in this folder as needed.
+2. Commit and merge your changes into the `main` branch.
+3. Manually import the updated JSON into GitHub via:  
+   **Repository Settings → Rules → Import ruleset**
 
-Do **not** edit Rulesets manually in the GitHub UI unless instructed — your changes will be overwritten by the workflow on the next sync.
+### Notes
+
+- GitHub does _not_ automatically apply the JSON files from this folder.
+- Updating rulesets requires manually importing them each time you make changes.
+- Editing rules directly in the GitHub UI will **not** sync back to these files — update the JSON here if you want changes reflected in version control.
