@@ -66,10 +66,11 @@ jobs:
 
             } else if (base === 'staging') {
               // staging: only from develop
-              allowed = head === 'develop';
+              allowed = head === 'develop' || head.startsWith('backport/');
               explanation = [
                 'Allowed PR sources into `staging`:',
-                '- `develop`',
+                '- `develop` (Standard Integration Flow)',
+                '- `backport/*` (Hotfix Propagation)',
               ].join('\n');
 
             } else if (base === 'develop') {
@@ -83,6 +84,7 @@ jobs:
                 'docs/',
                 'test/',
                 'chore/',
+                'backport/',
               ];
 
               allowed = startsWithOneOf(head, allowedPrefixes);
@@ -97,6 +99,7 @@ jobs:
                 '- `docs/*`',
                 '- `test/*`',
                 '- `chore/*`',
+                '- `backport/*` (Hotfix Propagation)'
               ].join('\n');
             } else {
               core.info(`Branch Guard: no rules defined for target "${base}", skipping validation.`);
