@@ -23,13 +23,13 @@ jobs:
     permissions:
       pull-requests: write 
       contents: read
-    if: github.event_name == 'pull_request'
     # Use the correct local path for the reusable workflow
     uses: ./.github/workflows/pr-branch-guard.yml 
     with:
       head_ref: ${{ github.head_ref }}
       base_ref: ${{ github.base_ref }}
-      pr_number: ${{ github.event.pull_request.number }}
+      pr_number: ${{ github.event.pull_request.number || 0 }}
+      event_name: ${{ github.event_name }}
 
   build-android:
     name: Build Android APK
