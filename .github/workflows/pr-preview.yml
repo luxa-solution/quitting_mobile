@@ -10,6 +10,9 @@ on:
 jobs:
   guard: # RUN THE GUARD FIRST
     name: Branch Flow Guard Check
+    permissions:
+      pull-requests: write
+      contents: read
     # Use the correct local path for the reusable workflow
     uses: ./.github/workflows/pr-branch-guard.yml 
     with:
@@ -19,7 +22,7 @@ jobs:
 
   preview:
     name: Build Preview & Comment
-    needs: guard # Depends on the guard check
+    needs: guard
     # Only run if guard passes AND branch starts with feature/ or bugfix/
     if: needs.guard.result == 'success' && (startsWith(github.head_ref, 'feature/') || startsWith(github.head_ref, 'bugfix/')) 
     runs-on: ubuntu-latest
