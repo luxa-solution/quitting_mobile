@@ -1,4 +1,3 @@
-# .github/workflows/eas-build.yml
 name: EAS Build
 
 on:

@@ -1,4 +1,3 @@
-# .github/workflows/github-release.yml
 name: GitHub Release with Builds
 
 on:
