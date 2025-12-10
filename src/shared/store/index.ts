@@ -1,1 +1,1 @@
-export { useNotificationStore } from './notificationStore';
+export { useAppOnboardingStore } from './appOnboardingStore';
