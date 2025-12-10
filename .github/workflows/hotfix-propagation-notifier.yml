@@ -2,83 +2,74 @@
 
 name: Hotfix Propagation Notifier
 
-on:
-  push:
-    branches:
-      - main # Trigger when main receives new commits (from merges)
-
+# This trigger runs *after* the PR is closed (merged) and provides high privilege
+# to the token, which is necessary for reliably commenting on a closed PR.
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
+  issues: write # Required for adding labels and posting comments
+  pull-requests: write # Required for reading PR details and adding labels/comments
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches:
+      - main # Only run when PR targets and merges into main
 
 jobs:
   generate_sop:
+    # Only runs if the pull request was merged (not just closed without merging)
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
 
     steps:
-      - name: Generate Hotfix Propagation SOP
+      - name: Generate and Post Hotfix Backport SOP
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
           script: |
             const { owner, repo } = context.repo;
+            const pr = github.event.pull_request;
 
-            // Get commit message, which contains the PR number (#123) regardless of merge type.
-            const commitMessage = context.payload.head_commit?.message || "";
-            core.info(`Processing push to main with commit message: ${commitMessage}`);
+            const prNumber = pr.number;
+            const hotfixBranch = pr.head.ref;
+            const baseBranch = pr.base.ref;
 
-            // --- 1. Find PR number from commit message (e.g., "Fix: Title (#123)") ---
-            const prMatch = commitMessage.match(/#(\d+)/);
-
-            if (!prMatch) {
-              core.info("No PR number found in commit message. Assuming direct push or unrelated merge. Exiting.");
+            core.info(`Processing merged PR #${prNumber}`);
+            
+            // --- 1. Validation (Ensure correct base and hotfix branch name) ---
+            if (baseBranch !== "main") {
+              core.info(`PR merged into '${baseBranch}', not main. Exiting.`);
               return;
             }
 
-            const originalPrNumber = Number(prMatch[1]);
-            core.info(`Detected PR #${originalPrNumber}`);
-
-            // --- 2. Fetch PR details for branch name and validation ---
-            const { data: mergedPr } = await github.rest.pulls.get({
-              owner,
-              repo,
-              pull_number: originalPrNumber,
-            });
-
-            const hotfixBranch = mergedPr.head.ref;
-
-            // Must be hotfix/*
             if (!hotfixBranch.startsWith("hotfix/")) {
-              core.info(`PR #${originalPrNumber} is not a hotfix branch (${hotfixBranch}). Exiting.`);
+              core.info(`Not a hotfix PR (${hotfixBranch}). Exiting.`);
               return;
             }
 
             core.info(`Hotfix PR confirmed: ${hotfixBranch}`);
 
-            // --- 3. Apply label: needs-backport (for tracking) ---
+            // --- 2. Label PR (Tracking) ---
             try {
               await github.rest.issues.addLabels({
                 owner,
                 repo,
-                issue_number: originalPrNumber,
+                issue_number: prNumber,
                 labels: ["needs-backport"],
               });
-              core.info(`Applied label: needs-backport`);
+              core.info(`Label 'needs-backport' applied.`);
             } catch (err) {
-              core.warning(`Labeling failed: ${err.message}`);
+              core.warning(`Failed to apply label: ${err.message}`);
             }
 
-            // --- 4. Branch existence check & SOP variables ---
+            // --- 3. Build SOP comment variables and checks ---
             const hotfixBase = hotfixBranch.split("/").pop();
-            const stagingBranch = `backport/${hotfixBase}-to-staging`;
-            const developBranch = `backport/${hotfixBase}-to-develop`;
+            const stagingBackport = `backport/${hotfixBase}-to-staging`;
+            const developBackport = `backport/${hotfixBase}-to-develop`;
             const repoUrl = `https://github.com/${owner}/${repo}`;
 
+            // Utility function to check branch existence (remains robust)
             async function branchExists(branch) {
               try {
                 await github.rest.repos.getBranch({ owner, repo, branch });
@@ -89,13 +80,13 @@ jobs:
               }
             }
 
-            const stagingExists = await branchExists(stagingBranch);
-            const developExists = await branchExists(developBranch);
+            const stagingExists = await branchExists(stagingBackport);
+            const developExists = await branchExists(developBackport);
 
-            // --- 5. Build SOP block helper function ---
+            // --- Build Backport Block Helper ---
             function buildBackportBlock(target, branchName, exists) {
               const base = target.toLowerCase();
-
+              
               if (exists) {
                 return [
                   `### ${target} Backport`,
@@ -127,7 +118,8 @@ jobs:
               ].join('\n');
             }
 
-            // --- 6. Assemble Final Message Blocks ---
+            // --- 4. Assemble Final Message Blocks ---
+            
             const blockSetup = [
               "### 🔧 1. Sync Local Main",
               "```bash",
@@ -135,34 +127,35 @@ jobs:
               "git pull origin main",
               "```",
             ].join('\n');
-
-            const blockStaging = buildBackportBlock("STAGING", stagingBranch, stagingExists);
-            const blockDevelop = buildBackportBlock("DEVELOP", developBranch, developExists);
+            
+            const blockStaging = buildBackportBlock("STAGING", stagingBackport, stagingExists);
+            const blockDevelop = buildBackportBlock("DEVELOP", developBackport, developExists);
 
             const blockCleanup = [
-              "### 🧹 4. Cleanup (After ALL Backport PRs Are Merged)",
+              "### 🧹 4. Cleanup (AFTER all backports merge)",
               "<details>",
-              "<summary>Remove hotfix branches</summary>",
+              "<summary>Remove leftover branches safely</summary>",
               "",
               "```bash",
               `git branch -D ${hotfixBranch}`,
               `git push origin :${hotfixBranch}`,
               "```",
-              "⚠️ Remove backport branches from GitHub UI after merging.",
+              "⚠️ Only remove backport branches *after* merging them.",
               "</details>",
             ].join('\n');
 
             const caveat = [
               "---",
-              "### ⚠️ SAFETY WARNINGS",
-              "- Inspect merge conflicts manually.",
-              "- Verify branch names before pushing.",
-              "- Do NOT delete hotfix branches prematurely.",
+              "### ⚠️ Safety Notes",
+              "- Resolve merge conflicts carefully.",
+              "- Verify branch names before merging.",
+              "- Do **not** delete the hotfix branch until both backport PRs are merged.",
             ].join("\n");
 
-            const message = [
-              `## 🔥 Hotfix Propagation SOP: \`${hotfixBranch}\``,
-              `A hotfix has been merged into **\`main\`**. Follow this propagation guide:`,
+
+            const sop = [
+              `## 🔥 Hotfix Backport SOP for \`${hotfixBranch}\``,
+              `This hotfix PR has been merged into **main**. To complete the propagation flow, you must manually backport it to **staging** and **develop**.`,
               "---",
               blockSetup,
               blockStaging,
@@ -171,12 +164,12 @@ jobs:
               caveat,
             ].join('\n\n');
 
-            // --- 7. Post comment ---
+            // --- 5. Post SOP comment ---
             await github.rest.issues.createComment({
               owner,
               repo,
-              issue_number: originalPrNumber,
-              body: message,
+              issue_number: prNumber,
+              body: sop,
             });
 
-            core.info(`Successfully posted propagation SOP for PR #${originalPrNumber}.`);
+            core.info(`SOP posted on PR #${prNumber}.`);
