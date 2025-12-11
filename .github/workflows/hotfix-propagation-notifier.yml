@@ -3,18 +3,19 @@
 name: Hotfix Propagation Notifier
 
 # Permissions must be declared here to ensure the default GITHUB_TOKEN has the 
-# necessary write access for labeling and commenting on the closed PR.
+# necessary write access for commenting on the closed PR.
 permissions:
   contents: read
-  issues: write 
-  pull-requests: write 
+  issues: write # Required for posting the SOP comment
+  pull-requests: write # Required for reading PR details
 
 on:
   pull_request_target:
-    types: [closed] 
-    
+    types: [closed]
+
 jobs:
   generate_sop:
+    # Only run if the PR was merged AND targeted 'main'.
     if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
 
@@ -26,15 +27,13 @@ jobs:
 
           script: |
             const { owner, repo } = context.repo;
-            const pr = context.payload.pull_request; 
+            const pr = context.payload.pull_request;
 
             const prNumber = pr.number;
             const hotfixBranch = pr.head.ref;
-            const repoUrl = `https://github.com/${owner}/${repo}`;
-
-            core.info(`Processing merged PR #${prNumber}`);
             
-            // --- 1. Validation (Must be hotfix/* branch) ---
+            core.info(`Processing merged PR #${prNumber}`);
+
             if (!hotfixBranch.startsWith("hotfix/")) {
               core.info(`PR head '${hotfixBranch}' is not hotfix/* — exiting.`);
               return;
@@ -42,81 +41,97 @@ jobs:
 
             core.info(`Confirmed hotfix PR: ${hotfixBranch}`);
 
-            // --- 2. Label PR (Tracking) ---
-            try {
-              await github.rest.issues.addLabels({
-                owner,
-                repo,
-                issue_number: prNumber,
-                labels: ["needs-propagation"], // Renamed label to reflect the process
-              });
-              core.info(`Applied label 'needs-propagation'.`);
-            } catch (err) {
-              core.warning(`Failed to apply label: ${err.message}`);
-            }
+            const repoUrl = `https://github.com/${owner}/${repo}`;
 
-            // --- 3. Build SOP data and instructions (SIMPLIFIED) ---
+            // --- 1. Sequential Propagations (Manually written blocks) ---
             
-            // We only need the branch names for the PR links
-            const stagingTarget = 'staging';
-            const developTarget = 'develop';
-
-            // --- Build Propagation Block Helper ---
-            function buildPropagationBlock(target) {
-              return [
-                `### 📌 Propagate to ${target.toUpperCase()}`,
-                "<details>",
-                "  <summary>Create PR: hotfix/* \u2192 " + target + "</summary>",
-                "",
-                "The **original** `hotfix` branch must be used to merge into the target branch.",
-                "",
-                `➡️ Create PR: [\`${hotfixBranch} \u2192 ${target}\`](${repoUrl}/compare/${target}...${hotfixBranch})`,
-                "",
-                "</details>",
-              ].join('\n');
-            }
-
-            // --- 4. Assemble Final Message Blocks ---
+            // WARNING FOR STEP 1: DEVELOP
+            const warningDevelop = [
+              "## ⚠️ SAFETY WARNING: STEP 1/2",
+              "The fix **MUST** be applied to `develop` before proceeding to `staging`.",
+              "---",
+            ].join("\n");
             
-            const blockSetup = ["### 🔧 1. Sync Local Main", "```bash", "git checkout main", "git pull origin main", "```"].join('\n');
-            const blockStaging = buildPropagationBlock(stagingTarget);
-            const blockDevelop = buildPropagationBlock(developTarget);
-
-            const blockCleanup = [
-              "### 🧹 4. Cleanup (AFTER ALL PRs are Merged)",
+            // BLOCK 1: HOTFIX -> DEVELOP
+            const blockDevelop = [
+              warningDevelop, 
+              "### 📌 1. `hotfix/*` → `develop`",
               "<details>",
-              "<summary>Remove the hotfix branch safely</summary>",
+              "  <summary>Create PR: hotfix → develop</summary>",
               "",
               "```bash",
-              `git checkout develop`,
+              `git checkout ${hotfixBranch}`,
+              `git pull origin ${hotfixBranch}`,
+              "```",
+              "",
+              `➡️ Create PR: [\`${hotfixBranch} \u2192 develop\`](${repoUrl}/compare/develop...${hotfixBranch})`,
+              "",
+              "</details>",
+            ].join("\n");
+
+            
+            // WARNING FOR STEP 2: STAGING
+            const warningStaging = [
+              "---",
+              "## ⚠️ SAFETY WARNING: STEP 2/2",
+              "The fix must travel through `develop`. **Do not start this PR until Step 1 has merged.**",
+              "---",
+            ].join("\n");
+
+            // BLOCK 2: DEVELOP -> STAGING
+            const blockStaging = [
+              warningStaging,
+              "### 📌 2. `develop` → `staging`",
+              "<details>",
+              "  <summary>Create PR: develop → staging</summary>",
+              "",
+              "```bash",
+              "git checkout develop",
+              "git pull origin develop",
+              "```",
+              "",
+              `➡️ Create PR: [\`develop \u2192 staging\`](${repoUrl}/compare/staging...develop)`,
+              "",
+              "</details>",
+            ].join("\n");
+
+            // --- 2. Cleanup section ---
+            
+            const blockCleanup = [
+              "### 🧹 3. Cleanup (AFTER ALL PRs are Merged)",
+              "<details>",
+              "<summary>Remove hotfix branches safely</summary>",
+              "",
+              "```bash",
+              `git switch develop # Switch to a stable branch`,
               `git branch -D ${hotfixBranch}`,
               `git push origin :${hotfixBranch}`,
               "```",
-              "⚠️ Only delete the branch once it has been successfully merged into **main**, **staging**, and **develop**.",
+              "⚠️ Only delete the branch once it has been successfully merged into **main**, **develop**, and **staging**.",
               "</details>",
-            ].join('\n');
-
-            const caveat = [
-              "---",
-              "### ⚠️ Safety Notes",
-              "- You will open PRs: 1) `hotfix/*` \u2192 `staging`, and 2) `hotfix/*` \u2192 `develop`.",
-              "- Resolve merge conflicts carefully.",
-              "- Do **not** delete the hotfix branch until ALL propagation PRs are merged.",
             ].join("\n");
 
+            const finalCaveatNotes = [
+              "---",
+              "### General Safety Notes",
+              "- Resolve merge conflicts carefully.",
+              "- Do **not** delete the hotfix branch prematurely.",
+            ].join("\n");
 
+            // --- 3. Build full SOP ---
+            
             const sop = [
               `## 🔥 Hotfix Propagation SOP: \`${hotfixBranch}\``,
-              `This hotfix has merged into **main**. You must manually open PRs directly from this branch to propagate the fix to lower environments.`,
+              `This hotfix has merged into **main**. You must now propagate the fix using the workflow detailed below:`,
               "---",
-              blockSetup,
-              blockStaging,
+              // Blocks are placed here, carrying their own warnings
               blockDevelop,
+              blockStaging,
               blockCleanup,
-              caveat,
-            ].join('\n\n');
+              finalCaveatNotes,
+            ].join("\n\n");
 
-            // --- 5. Post SOP comment ---
+            // --- 4. Post SOP comment ---
             try {
               await github.rest.issues.createComment({
                 owner,
