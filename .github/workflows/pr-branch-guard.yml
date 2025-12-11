@@ -23,7 +23,6 @@ on:
 
 permissions:
   contents: read
-  issues: write # Needed for commenting
   pull-requests: write # Needed for closing PR
 
 jobs:
