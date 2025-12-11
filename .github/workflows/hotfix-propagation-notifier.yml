@@ -88,6 +88,7 @@ jobs:
               "<summary>Remove the hotfix branch safely</summary>",
               "",
               "```bash",
+              `git checkout develop`,
               `git branch -D ${hotfixBranch}`,
               `git push origin :${hotfixBranch}`,
               "```",
