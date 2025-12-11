@@ -6,35 +6,31 @@ name: Hotfix Propagation Notifier
 # necessary write access for labeling and commenting on the closed PR.
 permissions:
   contents: read
-  issues: write # Required for adding labels and posting comments
-  pull-requests: write # Required for reading PR details and adding labels/comments
+  issues: write 
+  pull-requests: write 
 
 on:
   pull_request_target:
-    types: [closed] # Triggers when the PR is closed (merged or not)
-    # CRITICAL: We remove the 'branches' filter here to ensure the PR payload is delivered.
-
+    types: [closed] 
+    
 jobs:
   generate_sop:
-    # CRITICAL IF: Only run if the PR was merged AND targeted 'main'.
-    # This prevents running on PRs targeting other branches or PRs closed without merging.
     if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Generate and Post Hotfix Backport SOP
+      - name: Generate and Post Hotfix Propagation SOP
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
           script: |
             const { owner, repo } = context.repo;
-            const pr = context.payload.pull_request; // <-- Correct and reliable payload access
+            const pr = context.payload.pull_request; 
 
-            // The IF check ensures these are never undefined:
             const prNumber = pr.number;
             const hotfixBranch = pr.head.ref;
-            const baseBranch = pr.base.ref;
+            const repoUrl = `https://github.com/${owner}/${repo}`;
 
             core.info(`Processing merged PR #${prNumber}`);
             
@@ -52,63 +48,29 @@ jobs:
                 owner,
                 repo,
                 issue_number: prNumber,
-                labels: ["needs-backport"],
+                labels: ["needs-propagation"], // Renamed label to reflect the process
               });
-              core.info(`Applied label 'needs-backport'.`);
+              core.info(`Applied label 'needs-propagation'.`);
             } catch (err) {
               core.warning(`Failed to apply label: ${err.message}`);
             }
 
-            // --- 3. Build SOP data and check existence ---
-            const hotfixBase = hotfixBranch.split("/").pop();
-            const stagingBackport = `backport/${hotfixBase}-to-staging`;
-            const developBackport = `backport/${hotfixBase}-to-develop`;
-            const repoUrl = `https://github.com/${owner}/${repo}`;
+            // --- 3. Build SOP data and instructions (SIMPLIFIED) ---
+            
+            // We only need the branch names for the PR links
+            const stagingTarget = 'staging';
+            const developTarget = 'develop';
 
-            // Utility function to check branch existence (for generating correct instructions)
-            async function branchExists(branch) {
-              try {
-                await github.rest.repos.getBranch({ owner, repo, branch });
-                return true;
-              } catch (error) {
-                if (error.status === 404) return false;
-                throw error;
-              }
-            }
-
-            const stagingExists = await branchExists(stagingBackport);
-            const developExists = await branchExists(developBackport);
-
-            // --- Build Backport Block Helper ---
-            function buildBackportBlock(target, branchName, exists) {
-              const base = target.toLowerCase();
-              
-              if (exists) {
-                return [
-                  `### ${target} Backport`,
-                  "<details>",
-                  `  <summary>⚠️ Branch already exists: <code>${branchName}</code></summary>`,
-                  "",
-                  `➡️ Open or inspect PR: [\`${branchName} \u2192 ${base}\`](${repoUrl}/compare/${base}...${branchName})`,
-                  "",
-                  "</details>",
-                ].join('\n');
-              }
-
+            // --- Build Propagation Block Helper ---
+            function buildPropagationBlock(target) {
               return [
-                `### ${target} Backport`,
+                `### 📌 Propagate to ${target.toUpperCase()}`,
                 "<details>",
-                "  <summary>Create backport branch \u2192 Open PR</summary>",
+                "  <summary>Create PR: hotfix/* \u2192 " + target + "</summary>",
                 "",
-                "```bash",
-                `git checkout ${base}`,
-                `git pull origin ${base}`,
-                `git checkout -b ${branchName}`,
-                `git merge ${hotfixBranch}`,
-                `git push origin ${branchName}`,
-                "```",
+                "The **original** `hotfix` branch must be used to merge into the target branch.",
                 "",
-                `➡️ Create PR: [\`${branchName} \u2192 ${base}\`](${repoUrl}/compare/${base}...${branchName})`,
+                `➡️ Create PR: [\`${hotfixBranch} \u2192 ${target}\`](${repoUrl}/compare/${target}...${hotfixBranch})`,
                 "",
                 "</details>",
               ].join('\n');
@@ -117,34 +79,34 @@ jobs:
             // --- 4. Assemble Final Message Blocks ---
             
             const blockSetup = ["### 🔧 1. Sync Local Main", "```bash", "git checkout main", "git pull origin main", "```"].join('\n');
-            const blockStaging = buildBackportBlock("STAGING", stagingBackport, stagingExists);
-            const blockDevelop = buildBackportBlock("DEVELOP", developBackport, developExists);
+            const blockStaging = buildPropagationBlock(stagingTarget);
+            const blockDevelop = buildPropagationBlock(developTarget);
 
             const blockCleanup = [
-              "### 🧹 4. Cleanup (AFTER all backports merge)",
+              "### 🧹 4. Cleanup (AFTER ALL PRs are Merged)",
               "<details>",
-              "<summary>Remove hotfix branches safely</summary>",
+              "<summary>Remove the hotfix branch safely</summary>",
               "",
               "```bash",
               `git branch -D ${hotfixBranch}`,
               `git push origin :${hotfixBranch}`,
               "```",
-              "⚠️ Only remove backport branches *after* merging them.",
+              "⚠️ Only delete the branch once it has been successfully merged into **main**, **staging**, and **develop**.",
               "</details>",
             ].join('\n');
 
             const caveat = [
               "---",
               "### ⚠️ Safety Notes",
+              "- You will open PRs: 1) `hotfix/*` \u2192 `staging`, and 2) `hotfix/*` \u2192 `develop`.",
               "- Resolve merge conflicts carefully.",
-              "- Verify base branches before executing commands.",
-              "- Do **not** delete the hotfix branch prematurely.",
+              "- Do **not** delete the hotfix branch until ALL propagation PRs are merged.",
             ].join("\n");
 
 
             const sop = [
-              `## 🔥 Hotfix Backport SOP for \`${hotfixBranch}\``,
-              `This hotfix PR has now been merged into **main**. To complete the propagation flow, you must manually backport it to **staging** and **develop**.`,
+              `## 🔥 Hotfix Propagation SOP: \`${hotfixBranch}\``,
+              `This hotfix has merged into **main**. You must manually open PRs directly from this branch to propagate the fix to lower environments.`,
               "---",
               blockSetup,
               blockStaging,
@@ -153,7 +115,7 @@ jobs:
               caveat,
             ].join('\n\n');
 
-            // --- 5. Post SOP comment (Guaranteed to work due to pull_request_target) ---
+            // --- 5. Post SOP comment ---
             try {
               await github.rest.issues.createComment({
                 owner,

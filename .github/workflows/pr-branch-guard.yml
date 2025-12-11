@@ -23,14 +23,14 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write 
+  issues: write # Needed for commenting
+  pull-requests: write # Needed for closing PR
 
 jobs:
   guard:
     runs-on: ubuntu-latest
     steps:
       - name: Enforce PR Branch Flow Rules
-        # Runs ONLY on PR events to check head -> base relationship and perform PR actions.
         if: ${{ inputs.event_name == 'pull_request' }}
         uses: actions/github-script@v7
         with:
@@ -42,7 +42,6 @@ jobs:
 
             core.info(`Branch Guard: checking PR #${prNumber}: ${head} -> ${base}`);
 
-            // Helper: does head start with any prefix in list?
             const startsWithOneOf = (branch, prefixes) =>
               prefixes.some(prefix => branch.startsWith(prefix));
 
@@ -50,56 +49,51 @@ jobs:
             let explanation = '';
 
             if (base === 'main') {
-              // main: only from staging, hotfix/*, release/*
+              // main: only from staging, hotfix/*, release/* (Unchanged)
               allowed =
                 head === 'staging' ||
-                head === 'release' ||               
+                head === 'release' || 
                 head.startsWith('hotfix/') ||
                 head.startsWith('release/');
 
               explanation = [
                 'Allowed PR sources into `main`:',
                 '- `staging`',
+                '- `release`',
                 '- `hotfix/*`',
                 '- `release/*`',
               ].join('\n');
 
             } else if (base === 'staging') {
-              // staging: only from develop
-              allowed = head === 'develop' || head.startsWith('backport/');
+              // staging: only from develop OR hotfix/*
+              allowed = head === 'develop' || head.startsWith('hotfix/');
               explanation = [
                 'Allowed PR sources into `staging`:',
                 '- `develop` (Standard Integration Flow)',
-                '- `backport/*` (Hotfix Propagation)',
+                '- `hotfix/*` (Direct Hotfix Propagation)',
               ].join('\n');
 
             } else if (base === 'develop') {
-              // develop: feature/*, bugfix/*, hotfix/*, release/*, refactor/*, docs/*, test/*, chore/*
+              // develop: feature/*, bugfix/*, ... OR hotfix/*
               const allowedPrefixes = [
                 'feature/',
                 'bugfix/',
-                'hotfix/',
+                // 'hotfix/' is already allowed here for the first time
                 'release/',
                 'refactor/',
                 'docs/',
                 'test/',
                 'chore/',
-                'backport/',
+                'hotfix/', // <-- NEW/RE-ADDED: Allows hotfix/ branch merges
               ];
 
               allowed = startsWithOneOf(head, allowedPrefixes);
 
               explanation = [
                 'Allowed PR sources into `develop`:',
-                '- `feature/*`',
-                '- `bugfix/*`',
-                '- `hotfix/*`',
-                '- `release/*`',
-                '- `refactor/*`',
-                '- `docs/*`',
-                '- `test/*`',
-                '- `chore/*`',
-                '- `backport/*` (Hotfix Propagation)'
+                '- `feature/*`, `bugfix/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*` (New Work)',
+                '- `hotfix/*` (Standard Development and Hotfix Propagation)',
+                '- `release/*` (Cross-Propagation)',
               ].join('\n');
             } else {
               core.info(`Branch Guard: no rules defined for target "${base}", skipping validation.`);
@@ -141,6 +135,5 @@ jobs:
             }
       
       - name: Allow non-PR events to succeed
-        # This step runs ONLY on non-PR events (push, dispatch, schedule) to ensure the job result is 'success'
         if: ${{ inputs.event_name != 'pull_request' }}
         run: echo "Event ${{ inputs.event_name }} is not a Pull Request, allowing downstream jobs to proceed."
