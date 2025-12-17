@@ -1,0 +1,78 @@
+name: Check Version Bump
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  check-version:
+    name: Verify Version Bump
+    runs-on: ubuntu-latest
+    # Only run for staging or hotfix branches
+    if: ${{ github.head_ref == 'staging' || startsWith(github.head_ref, 'hotfix/') }}
+    permissions:
+      contents: read
+      pull-requests: write # Required to post comments
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # We need history to compare with main
+
+      - name: Compare Versions
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+
+            // 1. Get Current Version (from the PR code)
+            const newPackage = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            const newVersion = newPackage.version;
+
+            // 2. Get Base Version (from origin/main)
+            try {
+              execSync('git fetch origin main');
+            } catch (e) {
+              console.log("Could not fetch main, assuming first run.");
+            }
+            
+            let oldVersion = "0.0.0";
+            try {
+              const oldPackageJson = execSync('git show origin/main:package.json').toString();
+              oldVersion = JSON.parse(oldPackageJson).version;
+            } catch (e) {
+              console.log("Could not read package.json from main (maybe new repo?)");
+            }
+
+            console.log(`Main Version: ${oldVersion}`);
+            console.log(`PR Version:   ${newVersion}`);
+
+            // 3. Compare
+            if (newVersion === oldVersion) {
+              // 4. Construct Critical Note
+              const body = `
+              ## ⚠️ Critical: Missing Version Bump
+              
+              You are merging **${context.payload.pull_request.head.ref}** into **main**, but the version is still **${oldVersion}**.
+              
+              Please bump the version in \`package.json\` before merging.
+              - [ ] Update \`package.json\` (e.g., \`npm version patch\`)
+              - [ ] Push changes
+              `;
+
+              // 5. Post Comment
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+
+              // 6. Fail the Workflow (Red X)
+              core.setFailed(`Version check failed: ${newVersion} matches main version.`);
+            } else {
+              console.log("✅ Version bumped successfully.");
+            }
