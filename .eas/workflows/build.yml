@@ -1,0 +1,175 @@
+name: Smart Build
+
+on:
+  push:
+    branches:
+      - main
+      - 'hotfix/*'
+    tags:
+      - "v*"
+    paths:
+      - src/**
+      - assets/**
+      - index.js
+      - app.json
+      - package.json
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Platform to build"
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - ios
+          - android
+      profile:
+        description: "Build profile"
+        required: true
+        type: choice
+        default: preview
+        options:
+          - development
+          - preview
+          - production
+      force_build:
+        description: "Force rebuild?"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # 0. Setup: Determine Profile, Platform, and Force Flag
+  setup:
+    name: Setup Build Config
+    type: custom
+    steps:
+      - uses: eas/checkout
+      - id: config
+        run: |
+          # 1. Initialize defaults (Standard Branch Push behavior)
+          PROFILE="preview"
+          PLATFORM="all"
+          FORCE="false"
+
+          # 2. Check for Manual Inputs
+          # We capture inputs via interpolation. If empty, these vars become empty strings.
+          MANUAL_PROFILE="${{ inputs.profile }}"
+          MANUAL_PLATFORM="${{ inputs.platform }}"
+          MANUAL_FORCE="${{ inputs.force_build }}"
+
+          if [ -n "$MANUAL_PROFILE" ]; then
+            echo "Detected Manual Trigger"
+            PROFILE="$MANUAL_PROFILE"
+            PLATFORM="$MANUAL_PLATFORM"
+            FORCE="$MANUAL_FORCE"
+          else
+            # 3. Check for Tag Trigger (fallback if no manual input)
+            # git describe returns the tag name if we are exactly on a tag
+            if git describe --exact-match --tags HEAD >/dev/null 2>&1; then
+              echo "Detected Tag Trigger"
+              PROFILE="production"
+              # Keeps default PLATFORM="all", FORCE="false"
+            else
+              echo "Detected Branch Push"
+              # Keeps default PROFILE="preview", PLATFORM="all", FORCE="false"
+            fi
+          fi
+
+          # 4. Normalize Boolean Force Flag
+          # Handles "true", "True", "1" -> "true"
+          if [[ "$FORCE" == "true" || "$FORCE" == "True" || "$FORCE" == "1" ]]; then
+            FORCE="true"
+          else
+            FORCE="false"
+          fi
+
+          # 5. Output values
+          echo "profile=$PROFILE" >> $GITHUB_OUTPUT
+          echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
+          echo "force=$FORCE" >> $GITHUB_OUTPUT
+    outputs:
+      profile: ${{ steps.config.outputs.profile }}
+      platform: ${{ steps.config.outputs.platform }}
+      force: ${{ steps.config.outputs.force }}
+
+  # 1. Read app version
+  read_app_version:
+    name: Read app version
+    needs: [setup]
+    type: custom
+    steps:
+      - uses: eas/checkout
+      - id: read
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          echo "app_version=$VER" >> $GITHUB_OUTPUT
+    outputs:
+      app_version: ${{ steps.read.outputs.app_version }}
+
+  # 3. ANDROID
+  get_android_build:
+    name: Check Android Build
+    needs: [read_app_version, setup]
+    if: ${{ needs.setup.outputs.platform == 'all' || needs.setup.outputs.platform == 'android' }}
+    type: get-build
+    params:
+      platform: android
+      profile: ${{ needs.setup.outputs.profile }}
+      runtime_version: ${{ needs.read_app_version.outputs.app_version }}
+      app_version:      ${{ needs.read_app_version.outputs.app_version }}
+
+  build_android:
+    name: Build Android
+    needs: [get_android_build, setup]
+    # Build if: (No existing build found) OR (Force build is true)
+    # We also re-check platform here to be safe (though 'needs' usually handles skipping)
+    if: ${{ (needs.setup.outputs.platform == 'all' || needs.setup.outputs.platform == 'android') && (!needs.get_android_build.outputs.build_id || needs.setup.outputs.force == 'true') }}
+    type: build
+    params:
+      platform: android
+      profile: ${{ needs.setup.outputs.profile }}
+
+  # submit_android:
+  #   name: Submit Android
+  #   needs: [build_android, setup]
+  #   # Only submit if: 
+  #   # 1. Profile is Production (Tag trigger)
+  #   # 2. A new build was successfully created
+  #   if: ${{ needs.setup.outputs.profile == 'production' && needs.build_android.outputs.build_id }}
+  #   type: submit
+  #   params:
+  #     build_id: ${{ needs.build_android.outputs.build_id }}
+  #     profile: production
+
+  # 4. iOS
+  get_ios_build:
+    name: Check iOS Build
+    needs: [read_app_version, setup]
+    if: ${{ needs.setup.outputs.platform == 'all' || needs.setup.outputs.platform == 'ios' }}
+    type: get-build
+    params:
+      platform: ios
+      profile: ${{ needs.setup.outputs.profile }}
+      runtime_version: ${{ needs.read_app_version.outputs.app_version }}
+      app_version:      ${{ needs.read_app_version.outputs.app_version }}
+
+  build_ios:
+    name: Build iOS
+    needs: [get_ios_build, setup]
+    # Build if: (No existing build found) OR (Force build is true)
+    if: ${{ (needs.setup.outputs.platform == 'all' || needs.setup.outputs.platform == 'ios') && (!needs.get_ios_build.outputs.build_id || needs.setup.outputs.force == 'true') }}
+    type: build
+    params:
+      platform: ios
+      profile: ${{ needs.setup.outputs.profile }}
+
+  # submit_ios:
+  #   name: Submit iOS
+  #   needs: [build_ios, setup]
+  #   if: ${{ needs.setup.outputs.profile == 'production' && needs.build_ios.outputs.build_id }}
+  #   type: submit
+  #   params:
+  #     build_id: ${{ needs.build_ios.outputs.build_id }}
+  #     profile: production
