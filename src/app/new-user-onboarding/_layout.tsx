@@ -1,10 +1,21 @@
-import { View, Text } from 'react-native';
+import { Stack } from 'expo-router';
+import { useUnistyles } from 'react-native-unistyles';
 
 function UserOnboardingLayout() {
+  const { theme } = useUnistyles();
+
   return (
-    <View>
-      <Text>New User Onboarding Layout</Text>
-    </View>
+    <Stack
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: theme.colors.background,
+        },
+        headerTitleStyle: {
+          color: theme.colors.typography,
+        },
+      }}>
+      <Stack.Screen name="index" />
+    </Stack>
   );
 }
 
