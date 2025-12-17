@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Template App",
-    "slug": "template",
+    "name": "Quitting",
+    "slug": "quittingmobile",
     "version": "0.0.1",
     "newArchEnabled": true,
     "scheme": "com.luxasolution.template",
@@ -22,18 +22,25 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.luxasolution.template"
+      "bundleIdentifier": "com.luxasolution.quitting"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/app-icons/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.luxasolution.template",
+      "package": "com.luxasolution.quitting",
       "edgeToEdgeEnabled": true
     },
     "runtimeVersion": {
       "policy": "appVersion"
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "da8523e0-5bbe-46ba-8a73-73b919fce765"
+      }
+    },
+    "owner": "luxa-digitals"
   }
 }
