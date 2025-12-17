@@ -1,25 +1,73 @@
 name: Performance Monitoring
 
 on:
-  workflow_run:
-    workflows: ["PR Branch Guard"]
-    types:
-      - completed
-  push:
+  push: 
     branches: 
       - main
   schedule:
     - cron: "0 0 * * 0" # Weekly on Sunday
+  pull_request: # Trigger directly on PR events for visible checks
+    types: [opened, synchronize, reopened]
+    branches:
+      - develop
+      - staging
+      - main
 
 jobs:
+  wait-for-branch-guard:
+    name: Wait for Branch Guard
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+    steps:
+      - name: Skip for non-PR events
+        if: github.event_name != 'pull_request'
+        run: echo "Non-PR event; skipping branch guard wait."
+
+      - name: Wait for PR Branch Guard
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const sha = context.payload.pull_request.head.sha;
+            const checkName = 'branch-guard';
+            const maxTries = 30;
+            const delayMs = 10000;
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+            for (let attempt = 1; attempt <= maxTries; attempt++) {
+              const { data } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: sha,
+                check_name: checkName,
+              });
+
+              const run = data.check_runs.find(r => r.name === checkName);
+
+              if (run && run.status === 'completed') {
+                if (run.conclusion === 'success') {
+                  core.info('Branch guard passed.');
+                  return;
+                }
+
+                core.setFailed(`Branch guard ${run.conclusion}`);
+                return;
+              }
+
+              core.info(`Branch guard not finished (try ${attempt}/${maxTries}); waiting ${delayMs / 1000}s`);
+              await sleep(delayMs);
+            }
+
+            core.setFailed('Branch guard did not complete in time.');
+
   performance-metrics:
     name: React Native Performance
-    if: >
-      github.event_name != 'workflow_run' ||
-      (
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.pull_requests[0].base.ref == 'develop'
-      )
+    # Only run on successful guard check OR non-PR events (push, schedule)
+    if: github.event_name != 'pull_request' || needs.wait-for-branch-guard.result == 'success'
+    needs: wait-for-branch-guard
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -28,32 +76,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # FIXED: Checkout correct ref based on event type
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: Get PR number
-        if: github.event_name == 'workflow_run'
+        if: github.event_name == 'pull_request' 
         id: pr
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // FIXED: Query GitHub API to find the PR associated with this branch
-            const { data: pullRequests } = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              head: `${context.repo.owner}:${context.payload.workflow_run.head_branch}`
-            });
+            const pr = context.payload.pull_request;
+            core.setOutput('number', pr.number);
+            core.info(`Found PR #${pr.number}`);
             
-            if (pullRequests.length > 0) {
-              const prNumber = pullRequests[0].number;
-              core.setOutput('number', prNumber);
-              core.info(`Found PR #${prNumber}`);
-            } else {
-              core.info('No open PR found');
-            }
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -81,7 +116,6 @@ jobs:
       - name: Analyze dependencies
         id: deps
         run: |
-          # Count dependencies
           TOTAL_DEPS=$(pnpm list --depth=Infinity --json | jq '[.. | .dependencies? | select(. != null) | keys] | add | unique | length')
           DIRECT_DEPS=$(cat package.json | jq '.dependencies | length')
           DEV_DEPS=$(cat package.json | jq '.devDependencies | length')
@@ -93,32 +127,23 @@ jobs:
       - name: Check for heavy dependencies
         id: heavy
         run: |
-          # List packages larger than 1MB
-          pnpm list --depth=Infinity --json | jq -r '
-            .. | .dependencies? | select(. != null) | 
-            to_entries[] | 
-            "\(.key)@\(.value.version // "unknown")"
-          ' | sort -u > all-deps.txt
-
           echo "Heavy dependencies:" > heavy-deps.txt
           du -sh node_modules/* | sort -rh | head -10 >> heavy-deps.txt
 
       - name: Calculate startup metrics
         id: startup
         run: |
-          # Measure JS bundle parsing time (approximation)
           START_TIME=$(node -e "console.time('startup'); try { require('./App.tsx'); } catch(e) {} console.timeEnd('startup')" 2>&1 | grep startup || echo "startup: 0ms")
           echo "startup_time=$START_TIME" >> $GITHUB_OUTPUT
 
       - name: Comment performance metrics
-        # FIXED: Only comment if we found a PR
-        if: github.event_name == 'workflow_run' && steps.pr.outputs.number != ''
+        if: github.event_name == 'pull_request' 
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const prNumber = parseInt('${{ steps.pr.outputs.number }}');
+            const prNumber = parseInt('${{ github.event.pull_request.number }}');
             const heavyDeps = fs.readFileSync('heavy-deps.txt', 'utf8');
 
             const comment = `## 📊 Performance Metrics
@@ -171,19 +196,15 @@ jobs:
 
   react-native-profiling:
     name: React Native Profiling
-    if: >
-      github.event_name != 'workflow_run' ||
-      (
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.pull_requests[0].base.ref == 'develop'
-      )
+    # Only run on successful guard check OR non-PR events (push, schedule)
+    if: github.event_name != 'pull_request' || needs.wait-for-branch-guard.result == 'success'
+    needs: wait-for-branch-guard
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # FIXED: Checkout correct ref based on event type
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -232,7 +253,6 @@ jobs:
       - name: Upload profiling results
         uses: actions/upload-artifact@v4
         with:
-          # FIXED: Add unique identifier to artifact name
           name: performance-profiling-${{ github.sha }}
           path: |
             *-count.txt

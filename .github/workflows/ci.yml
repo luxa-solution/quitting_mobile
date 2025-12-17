@@ -1,4 +1,3 @@
-# .github/workflows/ci.yml
 name: CI
 
 on:
@@ -10,23 +9,74 @@ on:
       - 'feature/*'
       - 'bugfix/*'
       - 'hotfix/*'
-  workflow_run:
-    workflows: ["PR Branch Guard"]
-    types:
-      - completed
-
+  pull_request: # Trigger directly on PR events for visible checks
+    types: [opened, synchronize, reopened]
+    branches:
+      - develop
+      - staging
+      - main
 
 jobs:
+  wait-for-branch-guard:
+    name: Wait for Branch Guard
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+    steps:
+      - name: Skip for non-PR events
+        if: github.event_name != 'pull_request'
+        run: echo "Non-PR event; skipping branch guard wait."
+
+      - name: Wait for PR Branch Guard
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const sha = context.payload.pull_request.head.sha;
+            const checkName = 'branch-guard';
+            const maxTries = 30;
+            const delayMs = 10000;
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+            for (let attempt = 1; attempt <= maxTries; attempt++) {
+              const { data } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: sha,
+                check_name: checkName,
+              });
+
+              const run = data.check_runs.find(r => r.name === checkName);
+
+              if (run && run.status === 'completed') {
+                if (run.conclusion === 'success') {
+                  core.info('Branch guard passed.');
+                  return;
+                }
+
+                core.setFailed(`Branch guard ${run.conclusion}`);
+                return;
+              }
+
+              core.info(`Branch guard not finished (try ${attempt}/${maxTries}); waiting ${delayMs / 1000}s`);
+              await sleep(delayMs);
+            }
+
+            core.setFailed('Branch guard did not complete in time.');
+
   lint:
     name: Lint & Type Check
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: wait-for-branch-guard # Depends on the guard check
+    if: github.event_name != 'pull_request' || needs.wait-for-branch-guard.result == 'success' # Check job result
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.ref }} # Use github.ref for push/PR
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -60,14 +110,15 @@ jobs:
 
   test:
     name: Run Tests
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: wait-for-branch-guard # Depends on the guard check
+    if: github.event_name != 'pull_request' || needs.wait-for-branch-guard.result == 'success' # Check job result
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.ref }} # Use github.ref for push/PR
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -105,14 +156,15 @@ jobs:
 
   build:
     name: Build App
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: wait-for-branch-guard # Depends on the guard check
+    if: github.event_name != 'pull_request' || needs.wait-for-branch-guard.result == 'success' # Check job result
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.ref }} # Use github.ref for push/PR
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -149,29 +201,30 @@ jobs:
 
   security:
     name: Security Audit
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: wait-for-branch-guard # Depends on the guard check
+    if: github.event_name != 'pull_request' || needs.wait-for-branch-guard.result == 'success' # Check job result
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.ref }} # Use github.ref for push/PR
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
       
-      - name: Setup pnpm  # <-- ADD
+      - name: Setup pnpm  
         uses: pnpm/action-setup@v3
 
-      - name: Get pnpm store directory  # <-- ADD
+      - name: Get pnpm store directory 
         id: pnpm-cache
         shell: bash
         run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
 
-      - name: Setup pnpm cache  # <-- ADD
+      - name: Setup pnpm cache 
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
@@ -179,7 +232,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Install dependencies  # <-- ADD
+      - name: Install dependencies  
         run: pnpm install --frozen-lockfile
 
       - name: Run npm audit

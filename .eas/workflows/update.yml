@@ -1,0 +1,113 @@
+name: Smart Update
+
+on:
+  push:
+    branches:
+      - develop
+      - staging
+    paths:
+      - src/**
+      - assets/**
+      - index.js
+
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "EAS update channel"
+        required: true
+        type: choice
+        default: preview
+        options:
+          - preview
+          - production
+      message:
+        description: "Update message"
+        required: false
+        type: string
+
+jobs:
+  # 0. Setup: Determine Channel and Message 
+  setup:
+    name: Setup Update Config
+    type: custom
+    steps:
+      - uses: eas/checkout
+      - id: config
+        run: |
+          CHANNEL="preview"
+
+          if [ -n "${{ inputs.channel }}" ]; then
+            CHANNEL="${{ inputs.channel }}"
+          fi
+
+          if [ "$CHANNEL" = "production" ] && [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "Production updates must come from main"
+            exit 1
+          fi
+
+          MSG="${{ inputs.message }}"
+          if [ -z "$MSG" ]; then
+            MSG=$(git log -1 --pretty=%s)
+          fi
+
+          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
+          echo "message=$MSG" >> $GITHUB_OUTPUT
+    outputs:
+      channel: ${{ steps.config.outputs.channel }}
+      message: ${{ steps.config.outputs.message }}
+
+  # 1. Read App Version
+  read_app_version:
+    name: Read app version
+    needs: [setup]
+    type: custom
+    steps:
+      - uses: eas/checkout
+      - id: read
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          echo "app_version=$VER" >> $GITHUB_OUTPUT
+    outputs:
+      app_version: ${{ steps.read.outputs.app_version }}
+
+  # 3. ANDROID
+  get_android_build:
+    name: Check Android Build
+    needs: [setup, read_app_version]
+    type: get-build
+    params:
+      platform: android
+      profile: ${{ needs.setup.outputs.channel }}
+      runtime_version: ${{ needs.read_app_version.outputs.app_version }}
+      app_version: ${{ needs.read_app_version.outputs.app_version }}
+
+  update_android:
+    name: Update Android
+    needs: [setup, get_android_build]
+    if: ${{ needs.get_android_build.outputs.build_id }}
+    type: update
+    params:
+      platform: android
+      branch: ${{ needs.setup.outputs.channel }}
+      message: ${{ needs.setup.outputs.message }}
+
+  # 4. iOS
+  get_ios_build:
+    name: Check iOS Build
+    needs: [setup, read_app_version]
+    type: get-build
+    params:
+      platform: ios
+      profile: ${{ needs.setup.outputs.channel }}
+      runtime_version: ${{ needs.read_app_version.outputs.app_version }}
+      app_version: ${{ needs.read_app_version.outputs.app_version }}
+
+  update_ios:
+    name: Update iOS
+    needs: [setup, get_ios_build]
+    if: ${{ needs.get_ios_build.outputs.build_id }}
+    type: update
+    params:
+      platform: ios
+      branch: ${{ needs.setup.outputs.channel }}
+      message: ${{ needs.setup.outputs.message }}

@@ -13,7 +13,6 @@ function UserOnboardingLayout() {
         headerTitleStyle: {
           color: theme.colors.typography,
         },
-        headerTintColor: theme.colors.typography,
       }}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
     </Stack>
