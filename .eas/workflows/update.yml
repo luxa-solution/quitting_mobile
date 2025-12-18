@@ -17,12 +17,14 @@ jobs:
   read_app_version:
     name: read-app-version
     type: custom
+    env:
+      EXPO_DEBUG: "1"
     steps:
       - uses: eas/checkout
       - id: read
         run: |
           VER=$(node -p "require('./package.json').version")
-          echo "app_version=$VER" >> "$EAS_OUTPUT"
+          set-output app_version "$VER"
     outputs:
       app_version: ${{ steps.read.outputs.app_version }}
 
@@ -43,6 +45,8 @@ jobs:
     needs: [get_android_build]
     if: ${{ needs.get_android_build.outputs.build_id }}
     type: update
+    env:
+      EXPO_DEBUG: "1"
     params:
       platform: android
       branch: preview
@@ -65,6 +69,8 @@ jobs:
     needs: [get_ios_build]
     if: ${{ needs.get_ios_build.outputs.build_id }}
     type: update
+    env:
+      EXPO_DEBUG: "1"
     params:
       platform: ios
       branch: preview
