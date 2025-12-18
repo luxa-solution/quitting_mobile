@@ -1,501 +1,454 @@
-# Git Branch Strategy for React Native/Expo Project
+# Git Branch Strategy for React Native / Expo Project
 
-## 🌳 Recommended Branch Structure
+This repository uses a **branch-driven deployment model** aligned with:
 
-Based on our GitHub Actions workflows, here's the optimal branch strategy:
+- **GitHub Actions** → policy, quality, and communication
+- **EAS Workflows** → OTA updates, native builds, and distribution
+
+All automation derives from **branch intent**.
+
+---
+
+## 📌 Source of Truth
+
+This document is the **single source of truth** for:
+
+- Allowed branch flows
+- Deployment behavior
+- CI/CD responsibilities
+- Versioning + release process
+
+It is enforced by:
+
+- GitHub branch protection rulesets
+- PR Branch Guard workflow
+- CI workflow checks
+- EAS Build & EAS Update workflows
+
+---
+
+## 🌿 Branch Structure
 
 ```
 main (production)
-├── staging (pre-production testing)
-├── develop (integration branch)
-│   ├── feature/user-authentication
-│   ├── feature/payment-integration
-│   ├── feature/dark-mode
-│   ├── bugfix/login-crash
-│   ├── bugfix/memory-leak
-│   └── hotfix/critical-security-patch
-└── release/v1.2.0 (optional release branches)
+├── staging (pre-production / QA)
+├── develop (integration)
+│   ├── feature/*
+│   ├── bugfix/*
+│   ├── refactor/*
+│   ├── docs/*
+│   ├── test/*
+│   └── chore/*
+├── hotfix/*
+└── release/* (optional)
 ```
 
-## 📋 Branch Types & Purposes
+---
 
-### 1. **`main`** (Protected)
+## 📋 Branch Types & Responsibilities
 
-- **Purpose**: Production-ready code
-- **Deployments**: App Store & Google Play Store
-- **Protection Rules**:
-  - ✅ Require PR reviews (2+ approvals)
-  - ✅ Require status checks to pass
-  - ✅ No direct pushes
-  - ✅ No force pushes
+### 1) `main` — Production (Protected)
 
-**Workflows Triggered:**
+**Purpose**
 
-- ✅ CI (full test suite)
-- ✅ EAS Build (production profile)
-- ✅ Bundle size tracking
-- ✅ Performance monitoring
+- Production-ready code only.
 
-**When to merge:**
+**Deployments**
 
-- After successful staging testing
-- When releasing to production
-- Only from `staging` or `hotfix/*` branches
+- Native builds via **EAS Build** (production profile)
+- App Store / Play Store distribution
+- GitHub Releases (notes)
+
+**Allowed PR sources into `main`**
+
+- `staging`
+- `hotfix/*`
+- `release/*`
+
+**What should land here**
+
+- Fully tested code that passed QA on `staging`
+- Hotfixes that were verified
+
+**Automation**
+
+- CI
+- Smart Build (production profile on tags / manual)
+- Release notes (release.yml)
+- Version bump verification for `staging → main` and `hotfix/* → main`
 
 ---
 
-### 2. **`develop`** (Protected)
+### 2) `staging` — QA / Pre-Production (Protected)
 
-- **Purpose**: Integration branch for features
-- **Deployments**: EAS Updates (OTA) for internal testing
-- **Protection Rules**:
-  - ✅ Require PR reviews (1+ approval)
-  - ✅ Require status checks to pass
-  - ✅ No direct pushes
+**Purpose**
 
-**Workflows Triggered:**
+- Final verification before production.
 
-- ✅ CI (full test suite)
-- ✅ EAS Update (preview channel)
-- ✅ Bundle size tracking
-- ✅ E2E tests
+**Deployments**
 
-**When to merge:**
+- EAS Updates (typically preview/staging channel depending on your mapping)
 
-- Feature branches after completion
-- Bugfix branches after testing
-- Regularly merge to `staging` for testing
+**Allowed PR sources into `staging`**
+
+- `develop`
+- `hotfix/*`
+
+**Automation**
+
+- CI
+- Smart Update (OTA)
 
 ---
 
-### 3. **`staging`** (Protected)
+### 3) `develop` — Integration (Protected)
 
-- **Purpose**: Pre-production testing environment
-- **Deployments**: EAS Updates (staging channel) or Preview builds
-- **Protection Rules**:
-  - ✅ Require PR reviews (1+ approval)
-  - ✅ Require status checks to pass
+**Purpose**
 
-**Workflows Triggered:**
+- Integration branch for ongoing work.
 
-- ✅ CI (full test suite)
-- ✅ EAS Update (staging channel)
-- ✅ E2E tests
-- ✅ Performance monitoring
+**Deployments**
 
-**When to merge:**
+- EAS Updates (preview channel) for internal testing.
 
-- From `develop` when ready for QA
-- After QA approval, merge to `main`
+**Allowed PR sources into `develop`**
+
+- `feature/*`, `bugfix/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`
+- `hotfix/*` (propagation)
+- `release/*` (cross-propagation)
+
+**Automation**
+
+- CI
+- Smart Update (OTA)
 
 ---
 
-### 4. **`feature/*`** (Short-lived)
+### 4) `feature/*` — Feature Development (Short-lived)
 
-- **Purpose**: New features development
-- **Naming**: `feature/feature-name`
-- **Examples**:
-  - `feature/user-profile`
-  - `feature/push-notifications`
-  - `feature/offline-mode`
+**Purpose**
 
-**Workflows Triggered:**
+- New functionality.
 
-- ✅ CI (linting, type check, tests)
-- ✅ PR Preview (when PR is opened)
-- ✅ Bundle size tracking
-- ✅ Performance checks
-
-**Lifecycle:**
+**Lifecycle**
 
 1. Branch from `develop`
-2. Develop feature
-3. Open PR to `develop`
-4. Get review approval
+2. Implement feature
+3. Open PR → `develop`
+4. CI + review
 5. Merge & delete branch
 
----
+**Automation**
 
-### 5. **`bugfix/*`** (Short-lived)
-
-- **Purpose**: Non-critical bug fixes
-- **Naming**: `bugfix/bug-description`
-- **Examples**:
-  - `bugfix/login-validation`
-  - `bugfix/image-caching`
-  - `bugfix/navigation-state`
-
-**Workflows Triggered:**
-
-- ✅ CI (linting, type check, tests)
-- ✅ PR Preview
-- ✅ Bundle size tracking
-
-**Lifecycle:**
-
-1. Branch from `develop`
-2. Fix bug
-3. Open PR to `develop`
-4. Merge & delete branch
+- CI on push + PR
+- (Optional) EAS Update per branch (if you keep branch updates for feature branches)
 
 ---
 
-### 6. **`hotfix/*`** (Short-lived)
+### 5) `bugfix/*` — Non-Critical Fixes (Short-lived)
 
-- **Purpose**: Critical production bugs
-- **Naming**: `hotfix/critical-issue`
-- **Examples**:
-  - `hotfix/payment-crash`
-  - `hotfix/data-loss`
-  - `hotfix/security-vulnerability`
+Same lifecycle as `feature/*`, but for non-critical fixes.
 
-**Workflows Triggered:**
+---
 
-- ✅ CI (full test suite)
-- ✅ EAS Build (production profile)
-- ✅ E2E tests
+### 6) `hotfix/*` — Critical Production Fixes (Short-lived)
 
-**Lifecycle:**
+**Purpose**
+
+- Emergency fixes for production.
+
+**Lifecycle**
 
 1. Branch from `main`
-2. Fix critical issue
-3. Open PR to `main`
-4. After merge, also merge to `develop` and `staging`
+2. Fix issue
+3. PR → `main`
+4. After merge:
+   - Propagate to `develop`
+   - Propagate to `staging`
 5. Delete branch
+
+**Automation**
+
+- CI
+- Smart Build (production profile)
+- Hotfix Propagation Notifier (SOP comment)
 
 ---
 
-### 7. **`release/*`** (Optional)
+### 7) `release/*` — Release Stabilization (Optional)
 
-- **Purpose**: Release preparation
-- **Naming**: `release/v1.2.0`
-- **Use when**: You need to stabilize before production
+**Purpose**
 
-**Workflows Triggered:**
+- Stabilize a release before production when you need a longer QA cycle.
 
-- ✅ CI (full test suite)
-- ✅ EAS Build (production profile)
-- ✅ E2E tests
-- ✅ Performance monitoring
+**Rules**
 
-**Lifecycle:**
+- Bug fixes only
+- No new features
+
+**Lifecycle**
 
 1. Branch from `develop`
-2. Version bumps, changelog updates
-3. Bug fixes only (no new features)
-4. Merge to `main` and tag
+2. Stabilize (fixes, version bump prep)
+3. PR → `staging` (QA)
+4. PR → `main` (release)
 5. Merge back to `develop`
 6. Delete branch
 
 ---
 
-## 🔄 Git Flow Diagram
+## 🔄 Branch Flow Rules (Enforced)
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  Feature Development Flow                               │
-└─────────────────────────────────────────────────────────┘
+| Target Branch | Allowed Sources                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------- |
+| `main`        | `staging`, `hotfix/*`, `release/*`                                                            |
+| `staging`     | `develop`, `hotfix/*`, `release/*` _(optional)_                                               |
+| `develop`     | `feature/*`, `bugfix/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `hotfix/*`, `release/*` |
 
-develop ──────●────────●────────●─────────●──────────────>
-              │        │        │         │
-              │        │        │         │ merge
-              │        │        │         │
-feature/A ────●────●───┘        │         │
-                   PR           │         │
-                                │         │
-feature/B ──────────────────────●────●────┘
-                                     PR
-
-
-┌─────────────────────────────────────────────────────────┐
-│  Release Flow                                           │
-└─────────────────────────────────────────────────────────┘
-
-main ────────────────────────●───────────────────────────>
-                             │ merge
-                             │
-staging ─────────────────●───┘
-                         │ merge
-                         │
-develop ──●───●───●──────┘
-          │   │   │
-          │   │   └─ feature/C
-          │   └───── feature/B
-          └───────── feature/A
-
-
-┌─────────────────────────────────────────────────────────┐
-│  Hotfix Flow                                            │
-└─────────────────────────────────────────────────────────┘
-
-main ────────────●─────────────●─────────────────────────>
-                 │             │ merge hotfix
-                 │             │
-hotfix/critical ─┘─────────────┘
-                                │
-                                └─> also merge to develop
-```
+> Enforcement is done by **PR Branch Guard** and branch protection rules.
 
 ---
 
-## 🏷️ Version Tagging Strategy
+## 🔐 Branch Protection Rules (Recommended)
 
-When merging to `main`, create version tags to trigger releases:
+> These should mirror your `.github/rulesets/*.json` files.
 
-### Semantic Versioning (SemVer)
+### `main`
 
-```
-v1.2.3
-│ │ │
-│ │ └─ PATCH (bug fixes)
-│ └─── MINOR (new features, backwards compatible)
-└───── MAJOR (breaking changes)
-```
-
-### Tag Examples:
-
-- **Production releases**: `v1.0.0`, `v1.1.0`, `v2.0.0`
-- **Pre-releases**: `v1.0.0-beta.1`, `v1.0.0-alpha.2`
-- **Release candidates**: `v1.0.0-rc.1`
-
-### Tagging Commands:
-
-```bash
-# Create and push tag
-git tag -a v1.2.0 -m "Release version 1.2.0"
-git push origin v1.2.0
-
-# This triggers the release.yml workflow automatically!
-```
-
----
-
-## 🔐 Branch Protection Rules
-
-### For `main`:
-
-```yaml
-Required reviews: 2
-Required status checks:
+- Require **2 approvals**
+- Require status checks:
   - CI / Lint & Type Check
   - CI / Run Tests
   - CI / Build App
-  - Bundle Size Analysis
-Dismiss stale reviews: ✅
-Require signed commits: ✅ (optional)
-Include administrators: ✅
-Restrict pushes: Only from staging
-```
+  - PR Branch Guard
+  - Check Version Bump _(when applicable)_
+- No direct pushes
+- No force pushes
+- Include administrators
 
-### For `develop`:
+### `staging`
 
-```yaml
-Required reviews: 1
-Required status checks:
+- Require **1 approval**
+- Require status checks:
   - CI / Lint & Type Check
   - CI / Run Tests
-Dismiss stale reviews: ✅
-Allow force pushes: ❌
-```
+  - PR Branch Guard
+- No direct pushes
 
-### For `staging`:
+### `develop`
 
-```yaml
-Required reviews: 1
-Required status checks:
+- Require **1 approval**
+- Require status checks:
   - CI / Lint & Type Check
   - CI / Run Tests
-  - E2E Tests / Detox
-```
+  - PR Branch Guard
+- No direct pushes
 
 ---
 
-## 📱 Deployment Channels Mapping
+## 📱 Deployment Channels Mapping (EAS)
 
-| Branch      | EAS Channel   | Build Profile | Purpose              |
-| ----------- | ------------- | ------------- | -------------------- |
-| `main`      | `production`  | `production`  | App Store/Play Store |
-| `staging`   | `staging`     | `preview`     | QA testing           |
-| `develop`   | `preview`     | `preview`     | Internal testing     |
-| `feature/*` | `pr-{number}` | `preview`     | Feature testing      |
+### OTA Updates (EAS Update)
+
+| Git Branch  | EAS Update Branch / Channel              | Purpose            |
+| ----------- | ---------------------------------------- | ------------------ |
+| `develop`   | `preview`                                | Internal testing   |
+| `staging`   | `preview` _(or `staging` if you add it)_ | QA                 |
+| `feature/*` | same as git branch _(optional)_          | Per-branch testing |
+| `bugfix/*`  | same as git branch _(optional)_          | Per-branch testing |
+
+> If you want to avoid clutter in EAS branches, disable per-branch updates and keep updates only for `develop` + `staging`.
+
+### Native Builds (EAS Build)
+
+| Git Branch / Trigger                   | Profile                   | When               |
+| -------------------------------------- | ------------------------- | ------------------ |
+| Tag `v*`                               | `production`              | Store-ready builds |
+| Push to `main` / `hotfix/*` (optional) | `preview` or `production` | As configured      |
+| Manual dispatch                        | select                    | On-demand          |
 
 ---
 
-## 🎯 Typical Development Workflow
+## 🏷️ Versioning & Releases
 
-### Starting a new feature:
+### Semantic Versioning
 
-```bash
-# 1. Start from develop
-git checkout develop
-git pull origin develop
-
-# 2. Create feature branch
-git checkout -b feature/user-settings
-
-# 3. Make changes and commit
-git add .
-git commit -m "feat: add user settings screen"
-
-# 4. Push and create PR
-git push origin feature/user-settings
-# Open PR on GitHub to merge into develop
+```
+vMAJOR.MINOR.PATCH
 ```
 
-### Releasing to production:
+Examples:
+
+- `v1.2.3`
+- `v1.3.0`
+- `v2.0.0`
+
+### Release Process
+
+1. Merge `develop → staging` (QA)
+2. Merge `staging → main`
+3. Ensure `package.json` version is bumped
+4. Tag release:
 
 ```bash
-# 1. Merge develop to staging for QA
-git checkout staging
-git merge develop
-git push origin staging
-
-# 2. After QA approval, merge to main
-git checkout main
-git merge staging
-git push origin main
-
-# 3. Tag the release
-git tag -a v1.2.0 -m "Release v1.2.0: User settings and bug fixes"
+git tag -a v1.2.0 -m "Release v1.2.0"
 git push origin v1.2.0
-
-# 4. Release workflow automatically builds and submits to stores!
 ```
 
-### Hotfix for production:
+This triggers:
 
-```bash
-# 1. Create hotfix from main
-git checkout main
-git checkout -b hotfix/critical-payment-bug
+- **Smart Build** (EAS build)
+- **Release** workflow (release notes)
 
-# 2. Fix the issue
-git add .
-git commit -m "fix: resolve payment processing crash"
+---
 
-# 3. Open PR to main
-git push origin hotfix/critical-payment-bug
+## 🔄 Git Flow Diagrams
 
-# 4. After merge to main, also merge to develop
-git checkout develop
-git merge hotfix/critical-payment-bug
-git push origin develop
+### Feature Development Flow
+
+```
+develop ──────●────────●────────●─────────●──────────────>
+              │        │        │         │
+feature/A ────●────●───┘        │         │
+                   PR           │         │
+feature/B ──────────────────────●────●────┘
+                                     PR
+```
+
+### Release Flow
+
+```
+develop ───────────────●───────────────>
+                        │
+                        │ PR
+                        ▼
+staging ───────────────●───────────────>
+                        │
+                        │ PR
+                        ▼
+main ──────────────────●───────────────>
+```
+
+### Hotfix Flow
+
+```
+main ────────────●─────────────●────────>
+                 │             │
+hotfix/* ────────┘             │
+                               ├─ propagate → develop
+                               └─ propagate → staging
 ```
 
 ---
 
-## 📊 Workflow Triggers Summary
+## 🎨 Naming Conventions
 
-| Branch Pattern | CI  | EAS Build | EAS Update | E2E Tests | PR Preview | Release     |
-| -------------- | --- | --------- | ---------- | --------- | ---------- | ----------- |
-| `main`         | ✅  | ✅        | ❌         | ✅        | ❌         | ✅ (on tag) |
-| `staging`      | ✅  | ❌        | ✅         | ✅        | ❌         | ❌          |
-| `develop`      | ✅  | ❌        | ✅         | ✅        | ❌         | ❌          |
-| `feature/*`    | ✅  | ❌        | ❌         | ❌        | ✅         | ❌          |
-| `bugfix/*`     | ✅  | ❌        | ❌         | ❌        | ✅         | ❌          |
-| `hotfix/*`     | ✅  | ✅        | ❌         | ✅        | ❌         | ❌          |
-
----
-
-## 🎨 Branch Naming Conventions
-
-### Format:
+Format:
 
 ```
 <type>/<short-description>
 ```
 
-### Types:
+Allowed types:
 
-- `feature/` - New features
-- `bugfix/` - Bug fixes
-- `hotfix/` - Critical production fixes
-- `refactor/` - Code refactoring
-- `docs/` - Documentation updates
-- `test/` - Test additions/updates
-- `chore/` - Maintenance tasks
+- `feature/`
+- `bugfix/`
+- `hotfix/`
+- `refactor/`
+- `docs/`
+- `test/`
+- `chore/`
+- `release/`
 
-### Examples:
+Examples:
 
-```bash
-✅ feature/user-authentication
-✅ bugfix/login-validation-error
-✅ hotfix/payment-crash-ios
-✅ refactor/api-client-structure
-✅ docs/update-readme
-✅ test/add-payment-tests
-✅ chore/update-dependencies
+- `feature/user-authentication`
+- `bugfix/login-validation`
+- `hotfix/payment-crash-ios`
+- `refactor/api-client-structure`
+- `docs/update-branch-strategy`
+- `test/add-auth-tests`
+- `chore/update-deps`
+
+Avoid:
+
 ```
-
-### Avoid:
-
-```bash
-❌ johns-branch
-❌ fix-bug
-❌ updates
-❌ feature
-❌ test-123
-```
-
----
-
-## 🚀 Quick Setup Commands
-
-```bash
-# Initialize main branches
-git checkout -b main
-git push -u origin main
-
-git checkout -b develop
-git push -u origin develop
-
-git checkout -b staging
-git push -u origin staging
-
-# Set up branch protection (via GitHub UI or CLI)
-gh api repos/:owner/:repo/branches/main/protection \
-  --method PUT \
-  --field required_pull_request_reviews[required_approving_review_count]=2
-
-gh api repos/:owner/:repo/branches/develop/protection \
-  --method PUT \
-  --field required_pull_request_reviews[required_approving_review_count]=1
+fix
+test123
+john-branch
+updates
 ```
 
 ---
 
-## 💡 Pro Tips
+## 🎯 Typical Workflows
 
-1. **Always branch from the right base:**
-   - Features → from `develop`
-   - Hotfixes → from `main`
-   - Releases → from `develop`
+### Start a new feature
 
-2. **Keep branches short-lived:**
-   - Merge features within 1-3 days
-   - Delete after merging
+```bash
+git checkout develop
+git pull origin develop
 
-3. **Sync regularly:**
+git checkout -b feature/user-settings
 
-   ```bash
-   git checkout develop
-   git pull origin develop
-   git checkout feature/your-feature
-   git rebase develop
-   ```
+# work + commit
+git add .
+git commit -m "feat: add user settings"
 
-4. **Use conventional commits:**
-   - `feat:` - New feature
-   - `fix:` - Bug fix
-   - `docs:` - Documentation
-   - `refactor:` - Code refactoring
-   - `test:` - Tests
-   - `chore:` - Maintenance
+git push -u origin feature/user-settings
+# open PR → develop
+```
 
-5. **Squash commits on merge:**
-   - Keeps history clean
-   - One commit per feature
+### Promote to staging (QA)
+
+```bash
+# via PR: develop → staging
+```
+
+### Release to production
+
+```bash
+# via PR: staging → main
+# then tag
+
+git tag -a v1.2.0 -m "Release v1.2.0"
+git push origin v1.2.0
+```
+
+### Hotfix
+
+```bash
+git checkout main
+git pull origin main
+
+git checkout -b hotfix/critical-payment-bug
+
+# fix + commit
+git add .
+git commit -m "fix: resolve payment crash"
+
+git push -u origin hotfix/critical-payment-bug
+# open PR → main
+```
 
 ---
 
-This branch strategy is battle-tested and works perfectly with our GitHub Actions workflows! 🎉
+## ✅ Best Practices
+
+- Keep branches short-lived
+- Prefer **squash merge**
+- Rebase feature branches on `develop` when needed
+- Use Conventional Commits:
+  - `feat:` `fix:` `docs:` `refactor:` `test:` `chore:`
+
+---
+
+## ✅ Final Note
+
+This strategy is:
+
+- Expo-native
+- CI-clean
+- Deterministic
+- Enforced by automation
+- Easy for humans to follow
