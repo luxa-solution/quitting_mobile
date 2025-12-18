@@ -5,6 +5,8 @@ on:
     branches:
       - develop
       - staging
+      - feature/**
+      - bugfix/**
     paths:
       - src/**
       - assets/**
