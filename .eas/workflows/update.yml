@@ -68,7 +68,7 @@ jobs:
       - id: read
         run: |
           VER=$(node -p "require('./package.json').version")
-          echo "app_version=$VER" >> $GITHUB_OUTPUT
+          echo "app_version=$VER" >> "$EAS_OUTPUT"
     outputs:
       app_version: ${{ steps.read.outputs.app_version }}
 
