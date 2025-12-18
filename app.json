@@ -12,17 +12,22 @@
       "tsconfigPaths": true
     },
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/app-icons/ios-light.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/app-icons/splash-icon-light.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#ffffff",
+      "dark": {
+        "image": "./assets/app-icons/splash-icon-dark.png",
+        "backgroundColor": "#000000"
+      }
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.luxasolution.quitting",
+      "icon": "./assets/app-icons/ios-light.png",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
