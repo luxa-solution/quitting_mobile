@@ -1,71 +1,66 @@
-name: preview-ota-update
+name: preview-build
 
 on:
   push:
     branches:
       - develop
-      - staging
-      - feature/**
-      - bugfix/**
+      - hotfix/**
     paths:
-      - src/**
-      - assets/**
-      - index.js
+      - app.json
+      - eas.json
+      - package.json
+      - assets/app-icons/**
 
 jobs:
-  # 1. Read App Version
+  # 1️⃣ Read app version
   read_app_version:
     name: read-app-version
     type: custom
     steps:
       - uses: eas/checkout
-      - id: read
+      - id: outputs
         run: |
           VER=$(node -p "require('./package.json').version")
           echo "app_version=$VER" >> "$EAS_OUTPUT"
     outputs:
-      app_version: ${{ steps.read.outputs.app_version }}
+      app_version: ${{ steps.outputs.outputs.app_version }}
 
-  # 2. Check if a compatible Android build exists
+  # 2️⃣ Check for existing Android build
   get_android_build:
     name: check-android-build
     needs: [read_app_version]
     type: get-build
     params:
       platform: android
-      profile: preview
       runtime_version: ${{ needs.read_app_version.outputs.app_version }}
       app_version: ${{ needs.read_app_version.outputs.app_version }}
 
-  # 3. Publish OTA update if build exists
-  update_android:
-    name: publish-ota-android-update
+  # 3️⃣ Build Android (preview) if missing
+  build_android:
+    name: build-android-preview
     needs: [get_android_build]
-    if: ${{ needs.get_android_build.outputs.build_id }}
-    type: update
+    if: ${{ !needs.get_android_build.outputs.build_id }}
+    type: build
     params:
       platform: android
-      branch: preview
-      message: "OTA update for version ${{ needs.read_app_version.outputs.app_version }}"
+      profile: preview
 
-  # 4. Check if a compatible iOS build exists
+  # 4️⃣ Check for existing iOS build
   get_ios_build:
     name: check-ios-build
     needs: [read_app_version]
     type: get-build
     params:
       platform: ios
-      profile: preview
       runtime_version: ${{ needs.read_app_version.outputs.app_version }}
       app_version: ${{ needs.read_app_version.outputs.app_version }}
 
-  # 5. Publish OTA update if build exists
-  update_ios:
-    name: publish-ota-ios-update
+  # 5️⃣ Build iOS (preview) if missing
+  build_ios:
+    name: build-ios-preview
     needs: [get_ios_build]
-    if: ${{ needs.get_ios_build.outputs.build_id }}
-    type: update
+    if: ${{ !needs.get_ios_build.outputs.build_id }}
+    type: build
     params:
       platform: ios
-      branch: preview
-      message: "OTA update for version ${{ needs.read_app_version.outputs.app_version }}"
+      profile: preview

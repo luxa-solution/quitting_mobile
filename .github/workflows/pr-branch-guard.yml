@@ -1,4 +1,4 @@
-name: PR Branch Guard
+name: pr-branch-guard
 
 on:
   pull_request:

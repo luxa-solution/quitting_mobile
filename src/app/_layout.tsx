@@ -7,6 +7,8 @@ import { useUnistyles } from 'react-native-unistyles';
 import '@/translation';
 import { useAppOnboardingStore } from '@/shared/store';
 
+SplashScreen.preventAutoHideAsync();
+
 export default function RootLayout() {
   const { theme } = useUnistyles();
 
