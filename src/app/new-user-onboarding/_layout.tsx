@@ -13,6 +13,7 @@ function UserOnboardingLayout() {
         headerTitleStyle: {
           color: theme.colors.typography,
         },
+        headerShown: false,
       }}>
       <Stack.Screen name="index" />
     </Stack>
