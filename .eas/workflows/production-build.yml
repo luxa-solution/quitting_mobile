@@ -1,4 +1,4 @@
-name: Production Build
+name: production-build
 
 on:
   push:
@@ -13,7 +13,7 @@ on:
 jobs:
   # 1️⃣ Read app version
   read_app_version:
-    name: Read app version
+    name: read-app-version
     type: custom
     steps:
       - uses: eas/checkout
@@ -26,7 +26,7 @@ jobs:
 
   # 2️⃣ Check for existing Android build
   get_android_build:
-    name: Check Android build
+    name: check-android-build
     needs: [read_app_version]
     type: get-build
     params:
@@ -36,7 +36,7 @@ jobs:
 
   # 3️⃣ Build Android (production) if missing
   build_android:
-    name: Build Android (production)
+    name: build-android-production
     needs: [get_android_build]
     if: ${{ !needs.get_android_build.outputs.build_id }}
     type: build
@@ -46,7 +46,7 @@ jobs:
 
   # 4️⃣ Check for existing iOS build
   get_ios_build:
-    name: Check iOS build
+    name: check-ios-build
     needs: [read_app_version]
     type: get-build
     params:
@@ -56,7 +56,7 @@ jobs:
 
   # 5️⃣ Build iOS (production) if missing
   build_ios:
-    name: Build iOS (production)
+    name: build-ios-production
     needs: [get_ios_build]
     if: ${{ !needs.get_ios_build.outputs.build_id }}
     type: build

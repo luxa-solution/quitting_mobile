@@ -1,4 +1,4 @@
-name: CI
+name: ci
 
 on:
   pull_request:
@@ -10,18 +10,16 @@ on:
 
 jobs:
   wait-for-branch-guard:
-    name: Wait for Branch Guard
+    name: check-branch-guard
     runs-on: ubuntu-latest
     permissions:
       checks: read
       contents: read
     steps:
       - name: Skip for non-PR events
-        if: github.event_name != 'pull_request'
         run: echo "Non-PR event; skipping branch guard wait."
 
       - name: Wait for PR Branch Guard
-        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -59,9 +57,9 @@ jobs:
             core.setFailed('Branch guard did not complete in time.');
 
   lint:
-    name: Lint & Type Check
+    name: lint
     needs: wait-for-branch-guard # Depends on the guard check
-    if: github.event_name != 'pull_request' || needs.wait-for-branch-guard.result == 'success' # Check job result
+    if: needs.wait-for-branch-guard.result == 'success' 
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -101,9 +99,9 @@ jobs:
         run: pnpm tsc --noEmit
 
   test:
-    name: Run Tests
+    name: test
     needs: wait-for-branch-guard # Depends on the guard check
-    if: github.event_name != 'pull_request' || needs.wait-for-branch-guard.result == 'success' # Check job result
+    if: needs.wait-for-branch-guard.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -147,9 +145,9 @@ jobs:
         if: always()
 
   build:
-    name: Build App
+    name: build
     needs: wait-for-branch-guard # Depends on the guard check
-    if: github.event_name != 'pull_request' || needs.wait-for-branch-guard.result == 'success' # Check job result
+    if: needs.wait-for-branch-guard.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -192,9 +190,9 @@ jobs:
         run: pnpm expo export --platform all
 
   security:
-    name: Security Audit
+    name: security-audit
     needs: wait-for-branch-guard # Depends on the guard check
-    if: github.event_name != 'pull_request' || needs.wait-for-branch-guard.result == 'success' # Check job result
+    if: needs.wait-for-branch-guard.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

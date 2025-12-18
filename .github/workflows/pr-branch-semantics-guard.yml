@@ -1,4 +1,4 @@
-name: PR Branch Semantics Guard
+name: pr-branch-semantics
 
 on:
   pull_request:

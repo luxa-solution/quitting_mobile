@@ -1,13 +1,9 @@
-# .github/workflows/hotfix-propagation-notifier.yml
+name: hotfix-propagation-notifier
 
-name: Hotfix Propagation Notifier
-
-# Permissions must be declared here to ensure the default GITHUB_TOKEN has the 
-# necessary write access for commenting on the closed PR.
 permissions:
   contents: read
-  issues: write # Required for posting the SOP comment
-  pull-requests: write # Required for reading PR details
+  issues: write
+  pull-requests: write
 
 on:
   pull_request_target:
