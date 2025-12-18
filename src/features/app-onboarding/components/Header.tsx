@@ -4,7 +4,7 @@ import { StyleSheet } from 'react-native-unistyles';
 export function Header() {
   return (
     <View style={styles.container}>
-      <Image source={require('@/assets/app-icons/adaptive-icon.png')} style={styles.icon} />
+      <Image source={require('@/assets/app-onboarding/app-icon.png')} style={styles.icon} />
       <Text style={styles.text}>Quitting</Text>
     </View>
   );
