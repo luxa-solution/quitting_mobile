@@ -1,16 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
-      - staging
-      - develop
-      - 'feature/*'
-      - 'bugfix/*'
-      - 'hotfix/*'
-  pull_request: # Trigger directly on PR events for visible checks
-    types: [opened, synchronize, reopened]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - develop
       - staging
