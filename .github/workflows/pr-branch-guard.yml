@@ -110,14 +110,6 @@ jobs:
                 body: message,
               });
 
-              // Auto-close the PR to prevent merge
-              await github.rest.pulls.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                state: 'closed',
-              });
-
               core.setFailed(`Disallowed PR: ${head} -> ${base}`);
             } else {
               core.info(`Branch Guard: PR #${prNumber}: ${head} -> ${base} is allowed (passed)`);

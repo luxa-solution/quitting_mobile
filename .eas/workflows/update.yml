@@ -5,6 +5,8 @@ on:
     branches:
       - develop
       - staging
+      - feature/**
+      - bugfix/**
     paths:
       - src/**
       - assets/**
@@ -40,7 +42,7 @@ jobs:
             CHANNEL="${{ inputs.channel }}"
           fi
 
-          if [ "$CHANNEL" = "production" ] && [ "${GITHUB_REF_NAME}" != "main" ]; then
+          if [ "$CHANNEL" = "production" ] && [ "${EAS_GIT_BRANCH}" != "main" ]; then
             echo "Production updates must come from main"
             exit 1
           fi
@@ -50,8 +52,8 @@ jobs:
             MSG=$(git log -1 --pretty=%s)
           fi
 
-          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
-          echo "message=$MSG" >> $GITHUB_OUTPUT
+          echo "channel=$CHANNEL" >> "$EAS_OUTPUT"
+          echo "message=$MSG" >> "$EAS_OUTPUT"
     outputs:
       channel: ${{ steps.config.outputs.channel }}
       message: ${{ steps.config.outputs.message }}
