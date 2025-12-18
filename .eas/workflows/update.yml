@@ -1,4 +1,4 @@
-name: Smart Update
+name: Preview OTA Update
 
 on:
   push:
@@ -12,56 +12,10 @@ on:
       - assets/**
       - index.js
 
-  workflow_dispatch:
-    inputs:
-      channel:
-        description: "EAS update channel"
-        required: true
-        type: choice
-        default: preview
-        options:
-          - preview
-          - production
-      message:
-        description: "Update message"
-        required: false
-        type: string
-
 jobs:
-  # 0. Setup: Determine Channel and Message 
-  setup:
-    name: Setup Update Config
-    type: custom
-    steps:
-      - uses: eas/checkout
-      - id: config
-        run: |
-          CHANNEL="preview"
-
-          if [ -n "${{ inputs.channel }}" ]; then
-            CHANNEL="${{ inputs.channel }}"
-          fi
-
-          if [ "$CHANNEL" = "production" ] && [ "${EAS_GIT_BRANCH}" != "main" ]; then
-            echo "Production updates must come from main"
-            exit 1
-          fi
-
-          MSG="${{ inputs.message }}"
-          if [ -z "$MSG" ]; then
-            MSG=$(git log -1 --pretty=%s)
-          fi
-
-          echo "channel=$CHANNEL" >> "$EAS_OUTPUT"
-          echo "message=$MSG" >> "$EAS_OUTPUT"
-    outputs:
-      channel: ${{ steps.config.outputs.channel }}
-      message: ${{ steps.config.outputs.message }}
-
   # 1. Read App Version
   read_app_version:
     name: Read app version
-    needs: [setup]
     type: custom
     steps:
       - uses: eas/checkout
@@ -72,44 +26,46 @@ jobs:
     outputs:
       app_version: ${{ steps.read.outputs.app_version }}
 
-  # 3. ANDROID
+  # 2. Check if a compatible Android build exists
   get_android_build:
     name: Check Android Build
-    needs: [setup, read_app_version]
+    needs: [read_app_version]
     type: get-build
     params:
       platform: android
-      profile: ${{ needs.setup.outputs.channel }}
+      profile: preview
       runtime_version: ${{ needs.read_app_version.outputs.app_version }}
       app_version: ${{ needs.read_app_version.outputs.app_version }}
 
+  # 3. Publish OTA update if build exists
   update_android:
-    name: Update Android
-    needs: [setup, get_android_build]
+    name: Publish Android OTA update
+    needs: [get_android_build]
     if: ${{ needs.get_android_build.outputs.build_id }}
     type: update
     params:
       platform: android
-      branch: ${{ needs.setup.outputs.channel }}
-      message: ${{ needs.setup.outputs.message }}
+      branch: preview
+      message: "OTA update for version ${{ needs.read_app_version.outputs.app_version }}"
 
-  # 4. iOS
+  # 4. Check if a compatible iOS build exists
   get_ios_build:
     name: Check iOS Build
-    needs: [setup, read_app_version]
+    needs: [read_app_version]
     type: get-build
     params:
       platform: ios
-      profile: ${{ needs.setup.outputs.channel }}
+      profile: preview
       runtime_version: ${{ needs.read_app_version.outputs.app_version }}
       app_version: ${{ needs.read_app_version.outputs.app_version }}
 
+  # 5. Publish OTA update if build exists
   update_ios:
-    name: Update iOS
-    needs: [setup, get_ios_build]
+    name: Publish iOS OTA update
+    needs: [get_ios_build]
     if: ${{ needs.get_ios_build.outputs.build_id }}
     type: update
     params:
       platform: ios
-      branch: ${{ needs.setup.outputs.channel }}
-      message: ${{ needs.setup.outputs.message }}
+      branch: preview
+      message: "OTA update for version ${{ needs.read_app_version.outputs.app_version }}"

@@ -1,0 +1,65 @@
+name: Production Build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - app.json
+      - eas.json
+      - package.json
+      - assets/app-icons/**
+
+jobs:
+  # 1️⃣ Read app version
+  read_app_version:
+    name: Read app version
+    type: custom
+    steps:
+      - uses: eas/checkout
+      - id: outputs
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          echo "app_version=$VER" >> "$EAS_OUTPUT"
+    outputs:
+      app_version: ${{ steps.outputs.outputs.app_version }}
+
+  # 2️⃣ Check for existing Android build
+  get_android_build:
+    name: Check Android build
+    needs: [read_app_version]
+    type: get-build
+    params:
+      platform: android
+      runtime_version: ${{ needs.read_app_version.outputs.app_version }}
+      app_version: ${{ needs.read_app_version.outputs.app_version }}
+
+  # 3️⃣ Build Android (production) if missing
+  build_android:
+    name: Build Android (production)
+    needs: [get_android_build]
+    if: ${{ !needs.get_android_build.outputs.build_id }}
+    type: build
+    params:
+      platform: android
+      profile: production
+
+  # 4️⃣ Check for existing iOS build
+  get_ios_build:
+    name: Check iOS build
+    needs: [read_app_version]
+    type: get-build
+    params:
+      platform: ios
+      runtime_version: ${{ needs.read_app_version.outputs.app_version }}
+      app_version: ${{ needs.read_app_version.outputs.app_version }}
+
+  # 5️⃣ Build iOS (production) if missing
+  build_ios:
+    name: Build iOS (production)
+    needs: [get_ios_build]
+    if: ${{ !needs.get_ios_build.outputs.build_id }}
+    type: build
+    params:
+      platform: ios
+      profile: production
