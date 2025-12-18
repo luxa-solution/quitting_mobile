@@ -34,6 +34,7 @@ jobs:
     type: get-build
     params:
       platform: android
+      profile: preview
       runtime_version: ${{ needs.read_app_version.outputs.app_version }}
       app_version: ${{ needs.read_app_version.outputs.app_version }}
 
@@ -56,6 +57,7 @@ jobs:
     type: get-build
     params:
       platform: ios
+      profile: preview
       runtime_version: ${{ needs.read_app_version.outputs.app_version }}
       app_version: ${{ needs.read_app_version.outputs.app_version }}
 
