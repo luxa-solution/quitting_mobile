@@ -1,0 +1,1 @@
+export { SlideData } from './item';

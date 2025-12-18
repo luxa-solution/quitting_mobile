@@ -6,7 +6,8 @@ function Index() {
   const hasAppOnboarded = useAppOnboardingStore((state) => state.hasOnboarded);
 
   if (!hasAppOnboarded) return <Redirect href="./new-app-onboarding" />;
-  return <Redirect href="./tabs" />;
+
+  return <Redirect href="./auth" />;
 }
 
 export default Index;

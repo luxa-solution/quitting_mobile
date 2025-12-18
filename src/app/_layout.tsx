@@ -1,4 +1,5 @@
 import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { useUnistyles } from 'react-native-unistyles';
 
 import '@/translation';
@@ -7,21 +8,24 @@ export default function RootLayout() {
   const { theme } = useUnistyles();
 
   return (
-    <Stack
-      initialRouteName="tabs"
-      screenOptions={{
-        headerStyle: {
-          backgroundColor: theme.colors.background,
-        },
-        headerTitleStyle: {
-          color: theme.colors.typography,
-        },
-        headerTintColor: theme.colors.typography,
-      }}>
-      <Stack.Screen name="tabs" options={{ headerShown: false }} />
-      <Stack.Screen name="auth" options={{ headerShown: false }} />
-      <Stack.Screen name="new-app-onboarding" options={{ headerShown: false }} />
-      <Stack.Screen name="new-user-onboarding" options={{ headerShown: false }} />
-    </Stack>
+    <>
+      <StatusBar style="auto" />
+      <Stack
+        initialRouteName="tabs"
+        screenOptions={{
+          headerStyle: {
+            backgroundColor: theme.colors.background,
+          },
+          headerTitleStyle: {
+            color: theme.colors.typography,
+          },
+          headerTintColor: theme.colors.typography,
+        }}>
+        <Stack.Screen name="tabs" options={{ headerShown: false }} />
+        <Stack.Screen name="auth" options={{ headerShown: false }} />
+        <Stack.Screen name="new-app-onboarding" options={{ headerShown: false }} />
+        <Stack.Screen name="new-user-onboarding" options={{ headerShown: false }} />
+      </Stack>
+    </>
   );
 }
