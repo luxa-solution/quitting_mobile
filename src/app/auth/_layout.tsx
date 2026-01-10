@@ -14,6 +14,7 @@ function AuthLayout() {
           color: theme.colors.typography,
         },
         animation: 'none',
+        headerShown: false,
       }}
       initialRouteName="login">
       <Stack.Screen name="login" />

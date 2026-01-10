@@ -1,15 +1,16 @@
-import { Text, Pressable } from 'react-native';
+import { Text, Pressable, PressableProps, StyleProp, ViewStyle, TextStyle } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
 
-type Props = {
-  onPress: () => void;
+type Props = PressableProps & {
   text: string;
+  buttonStyle?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
 };
 
-export function AppButton({ onPress, text }: Props) {
+export function AppButton({ onPress, text, buttonStyle, textStyle, ...rest }: Props) {
   return (
-    <Pressable style={styles.button} onPress={onPress}>
-      <Text style={styles.buttonText}>{text}</Text>
+    <Pressable style={[styles.button, buttonStyle]} onPress={onPress} {...rest}>
+      <Text style={[styles.buttonText, textStyle]}>{text}</Text>
     </Pressable>
   );
 }
