@@ -1,0 +1,579 @@
+name: Performance Monitoring
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "assets/**"
+      - "app.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "app.json"
+      - "eas.json"
+      - "metro.config.*"
+      - "tsconfig.json"
+      - ".github/workflows/**"
+      - ".eas/workflows/**"
+
+concurrency:
+  group: perf-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  wait-for-branch-guard:
+    name: Wait for branch-guard
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      checks: read
+      contents: read
+    steps:
+      - name: Wait for PR Branch Guard
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.info('No pull_request payload found; skipping.');
+              return;
+            }
+
+            const sha = pr.head.sha;
+            const checkName = 'branch-guard';
+            const maxTries = 30;
+            const delayMs = 10000;
+            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+            for (let attempt = 1; attempt <= maxTries; attempt++) {
+              const { data } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: sha,
+                check_name: checkName,
+              });
+
+              const run = (data.check_runs || []).find(r => r.name === checkName);
+
+              if (run && run.status === 'completed') {
+                if (run.conclusion === 'success') {
+                  core.info('Branch guard passed.');
+                  return;
+                }
+                core.setFailed(`Branch guard ${run.conclusion}`);
+                return;
+              }
+
+              core.info(`Branch guard not finished (try ${attempt}/${maxTries}); waiting ${delayMs/1000}s`);
+              await sleep(delayMs);
+            }
+
+            core.setFailed('Branch guard did not complete in time.');
+
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'src/**'
+              - 'assets/**'
+              - 'app.config.*'
+              - 'metro.config.*'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - '.npmrc'
+              - 'tsconfig.json'
+              - '.github/workflows/**'
+              - '.eas/workflows/**'
+              - 'app.json'
+              - 'eas.json'
+
+  perf_baseline:
+    name: Baseline snapshot (push)
+    if: github.event_name == 'push' && needs.changes.outputs.relevant == 'true'
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Export (Android only)
+        run: pnpm expo export --platform android --output-dir dist-perf
+
+      - name: Generate baseline report (with best-effort filename de-hashing)
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          function walk(dir) {
+            let size = 0;
+            let files = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const p = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                const r = walk(p);
+                size += r.size;
+                files = files.concat(r.files);
+              } else {
+                const st = fs.statSync(p);
+                size += st.size;
+                files.push({ file: p, size: st.size });
+              }
+            }
+            return { size, files };
+          }
+
+          function safeReadJson(p) {
+            try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+          }
+
+          // Build a map from exported file paths -> original asset hints (best effort).
+          function buildAssetHintMap(outDir) {
+            const hints = new Map();
+
+            const meta = safeReadJson(path.join(outDir, 'metadata.json'));
+            if (meta && Array.isArray(meta.assets)) {
+              for (const a of meta.assets) {
+                // Example fields vary; we try a few common ones:
+                const name = a.name || a.httpServerLocation || a.fileSystemLocation || a.type || 'asset';
+                const hashes = []
+                  .concat(a.fileHashes || [])
+                  .concat(a.hash ? [a.hash] : []);
+
+                // Not perfect, but helps when filenames include a hash.
+                for (const h of hashes) hints.set(String(h), String(name));
+              }
+            }
+
+            const assetMap = safeReadJson(path.join(outDir, 'assetmap.json'));
+            if (assetMap && Array.isArray(assetMap)) {
+              // Expo often writes an array of { "assetId", "files": [...], ... }
+              for (const a of assetMap) {
+                const hint = a.httpServerLocation || a.name || a.type || a.assetId;
+                const files = a.files || a.fileHashes || [];
+                for (const f of files) hints.set(String(f), String(hint));
+              }
+            }
+
+            return hints;
+          }
+
+          function hintForFile(rel, hintMap) {
+            // Try to extract a long hex-ish chunk from the filename and map it.
+            const base = path.basename(rel);
+            const m = base.match(/[a-f0-9]{16,}/i);
+            if (!m) return null;
+            const key = m[0].toLowerCase();
+            // direct match or partial match
+            if (hintMap.has(key)) return hintMap.get(key);
+            for (const [k, v] of hintMap.entries()) {
+              if (key.includes(k.toLowerCase()) || k.toLowerCase().includes(key)) return v;
+            }
+            return null;
+          }
+
+          const outDir = 'dist-perf';
+          const { size, files } = walk(outDir);
+          files.sort((a,b) => b.size - a.size);
+
+          const hintMap = buildAssetHintMap(outDir);
+
+          const top = files.slice(0, 15).map(f => {
+            const rel = f.file.replace(outDir + path.sep, '').replaceAll(path.sep, '/');
+            const hint = hintForFile(rel, hintMap);
+            return {
+              file: rel,
+              bytes: f.size,
+              hint: hint || undefined,
+            };
+          });
+
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const depCount = Object.keys(pkg.dependencies || {}).length;
+
+          const report = {
+            branch: process.env.GITHUB_REF_NAME,
+            sha: process.env.GITHUB_SHA,
+            generatedAt: new Date().toISOString(),
+            platform: "android",
+            exportDir: outDir,
+            exportBytes: size,
+            exportMB: (size / (1024 * 1024)).toFixed(2),
+            topFiles: top,
+            depCount,
+          };
+
+          fs.writeFileSync('perf-report.json', JSON.stringify(report, null, 2));
+          console.log('Baseline Size:', report.exportMB, 'MB');
+          NODE
+
+      - name: Upload baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-baseline-main
+          path: perf-report.json
+          retention-days: 30
+
+  perf_pr:
+    name: PR performance (comment)
+    if: github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true' && needs.wait-for-branch-guard.result == 'success'
+    needs: [wait-for-branch-guard, changes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Export (Android only)
+        run: pnpm expo export --platform android --output-dir dist-perf
+
+      - name: Generate PR report (with best-effort filename de-hashing)
+        env:
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          function walk(dir) {
+            let size = 0;
+            let files = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const p = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                const r = walk(p);
+                size += r.size;
+                files = files.concat(r.files);
+              } else {
+                const st = fs.statSync(p);
+                size += st.size;
+                files.push({ file: p, size: st.size });
+              }
+            }
+            return { size, files };
+          }
+
+          function safeReadJson(p) {
+            try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+          }
+
+          function buildAssetHintMap(outDir) {
+            const hints = new Map();
+
+            const meta = safeReadJson(path.join(outDir, 'metadata.json'));
+            if (meta && Array.isArray(meta.assets)) {
+              for (const a of meta.assets) {
+                const name = a.name || a.httpServerLocation || a.fileSystemLocation || a.type || 'asset';
+                const hashes = []
+                  .concat(a.fileHashes || [])
+                  .concat(a.hash ? [a.hash] : []);
+                for (const h of hashes) hints.set(String(h), String(name));
+              }
+            }
+
+            const assetMap = safeReadJson(path.join(outDir, 'assetmap.json'));
+            if (assetMap && Array.isArray(assetMap)) {
+              for (const a of assetMap) {
+                const hint = a.httpServerLocation || a.name || a.type || a.assetId;
+                const files = a.files || a.fileHashes || [];
+                for (const f of files) hints.set(String(f), String(hint));
+              }
+            }
+
+            return hints;
+          }
+
+          function hintForFile(rel, hintMap) {
+            const base = path.basename(rel);
+            const m = base.match(/[a-f0-9]{16,}/i);
+            if (!m) return null;
+            const key = m[0].toLowerCase();
+            if (hintMap.has(key)) return hintMap.get(key);
+            for (const [k, v] of hintMap.entries()) {
+              const kk = k.toLowerCase();
+              if (key.includes(kk) || kk.includes(key)) return v;
+            }
+            return null;
+          }
+
+          const outDir = 'dist-perf';
+          const { size, files } = walk(outDir);
+          files.sort((a,b) => b.size - a.size);
+
+          const hintMap = buildAssetHintMap(outDir);
+
+          const top = files.slice(0, 15).map(f => {
+            const rel = f.file.replace(outDir + path.sep, '').replaceAll(path.sep, '/');
+            const hint = hintForFile(rel, hintMap);
+            return {
+              file: rel,
+              bytes: f.size,
+              hint: hint || undefined,
+            };
+          });
+
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const depCount = Object.keys(pkg.dependencies || {}).length;
+
+          const report = {
+            prNumber: process.env.GITHUB_PR_NUMBER,
+            baseBranch: process.env.GITHUB_BASE_REF,
+            headSha: process.env.GITHUB_SHA,
+            generatedAt: new Date().toISOString(),
+            platform: "android",
+            exportDir: outDir,
+            exportBytes: size,
+            exportMB: (size / (1024 * 1024)).toFixed(2),
+            topFiles: top,
+            depCount,
+          };
+
+          fs.writeFileSync('perf-report.json', JSON.stringify(report, null, 2));
+          console.log('PR Size:', report.exportMB, 'MB');
+          NODE
+
+      - name: Download baseline
+        uses: dawidd6/action-download-artifact@v6
+        continue-on-error: true
+        with:
+          workflow: performance.yml
+          branch: main
+          name: perf-baseline-main
+          path: baseline
+
+      - name: Build PR comment (table + warnings + top files)
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+
+          const pr = JSON.parse(fs.readFileSync('perf-report.json', 'utf8'));
+          const basePath = 'baseline/perf-report.json';
+          const base = fs.existsSync(basePath) ? JSON.parse(fs.readFileSync(basePath, 'utf8')) : null;
+
+          const mb = (bytes) => bytes / (1024 * 1024);
+          const fmtMB = (bytes) => `${mb(bytes).toFixed(2)} MB`;
+
+          // ---- Tune thresholds here ----
+          const WARN_ABS_MB = 10;      // warn if total export > 10MB
+          const WARN_DELTA_MB = 0.5;   // warn if increase >= 0.5MB
+          const WARN_DELTA_PCT = 5;    // warn if increase >= 5%
+          const LARGE_FILE_KB = 200;   // highlight > 200KB
+          const HUGE_FILE_KB = 500;    // warn > 500KB
+          // ------------------------------
+
+          const prBytes = pr.exportBytes;
+          const baseBytes = base?.exportBytes;
+
+          let warn = false;
+          let deltaText = '_No baseline found yet. (Merge to update baseline.)_';
+          let depDeltaText = '—';
+
+          if (mb(prBytes) >= WARN_ABS_MB) warn = true;
+
+          if (typeof baseBytes === 'number') {
+            const delta = prBytes - baseBytes;
+            const pct = baseBytes > 0 ? (delta / baseBytes) * 100 : 0;
+            const sign = delta >= 0 ? '+' : '';
+            deltaText = `${sign}${fmtMB(delta)} (${sign}${pct.toFixed(1)}%)`;
+
+            const depDelta = pr.depCount - (base.depCount ?? 0);
+            const depSign = depDelta >= 0 ? '+' : '';
+            depDeltaText = `${pr.depCount} (${depSign}${depDelta})`;
+
+            if (delta >= WARN_DELTA_MB * 1024 * 1024 || pct >= WARN_DELTA_PCT) warn = true;
+          } else {
+            depDeltaText = `${pr.depCount}`;
+          }
+
+          const huge = [];
+          const large = [];
+          for (const f of pr.topFiles || []) {
+            const kb = f.bytes / 1024;
+            const label = f.hint ? `${f.file}  ←  ${f.hint}` : f.file;
+            if (kb >= HUGE_FILE_KB) huge.push(`${label} (${kb.toFixed(0)} KB)`);
+            else if (kb >= LARGE_FILE_KB) large.push(`${label} (${kb.toFixed(0)} KB)`);
+          }
+          if (huge.length) warn = true;
+
+          const icon = warn ? '⚠️' : '✅';
+          const title = warn ? 'Performance review needed' : 'Performance looks OK';
+
+          const top10 = (pr.topFiles || [])
+            .slice(0, 10)
+            .map(t => {
+              const kb = (t.bytes/1024).toFixed(0);
+              const label = t.hint ? `${t.file}  ←  ${t.hint}` : t.file;
+              return `${kb} KB\t${label}`;
+            })
+            .join('\n');
+
+          const warnings = [];
+          if (mb(prBytes) >= WARN_ABS_MB) warnings.push(`Export size is ≥ ${WARN_ABS_MB} MB`);
+          if (typeof baseBytes === 'number') {
+            const delta = prBytes - baseBytes;
+            const pct = baseBytes > 0 ? (delta / baseBytes) * 100 : 0;
+            if (delta >= WARN_DELTA_MB * 1024 * 1024) warnings.push(`Size increased by ≥ ${WARN_DELTA_MB} MB vs baseline`);
+            if (pct >= WARN_DELTA_PCT) warnings.push(`Size increased by ≥ ${WARN_DELTA_PCT}% vs baseline`);
+          }
+          if (huge.length) warnings.push(`Found ${huge.length} file(s) ≥ ${HUGE_FILE_KB} KB`);
+
+          const warningBlock = warnings.length
+            ? `### ⚠️ Warnings\n${warnings.map(w => `- ${w}`).join('\n')}\n`
+            : `### ✅ No warnings\n`;
+
+          const hugeBlock = huge.length
+            ? `<details>\n<summary>Huge files (≥ ${HUGE_FILE_KB} KB)</summary>\n\n\`\`\`text\n${huge.join('\n')}\n\`\`\`\n</details>\n`
+            : '';
+
+          const largeBlock = large.length
+            ? `<details>\n<summary>Large files (≥ ${LARGE_FILE_KB} KB)</summary>\n\n\`\`\`text\n${large.join('\n')}\n\`\`\`\n</details>\n`
+            : '';
+
+          const body = `
+          ## ${icon} Performance (export size) — ${title}
+
+          | Metric | Value |
+          | :--- | :--- |
+          | **Target branch** | \`${process.env.GITHUB_BASE_REF}\` |
+          | **PR export size (android)** | **${fmtMB(prBytes)}** |
+          | **Δ vs baseline** | ${deltaText} |
+          | **Dependencies** | ${depDeltaText} |
+
+          ${warningBlock}
+
+          <details>
+          <summary>Largest files (top 10)</summary>
+
+          \`\`\`text
+          ${top10}
+          \`\`\`
+          </details>
+
+          ${hugeBlock}
+          ${largeBlock}
+
+          _Info-only. This does not block merges._  
+          _Calculated via Expo Export (Android)._
+          `.replace(/^ {10}/gm, '').trim();
+
+          fs.writeFileSync('perf-comment.md', body);
+          NODE
+
+      - name: Comment on PR (create or update)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const pr = context.payload.pull_request;
+            if (!pr) return;
+
+            const body = fs.readFileSync('perf-comment.md', 'utf8');
+            const issue_number = pr.number;
+            const { owner, repo } = context.repo;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo, issue_number,
+              per_page: 100,
+            });
+
+            const marker = 'Performance (export size)';
+            const existing = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+            }

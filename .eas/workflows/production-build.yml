@@ -1,73 +1,34 @@
-name: production-build
+name: Production Release Build
 
 on:
-  push:
-    branches:
-      - main
+  pull_request:
+    branches: ['production']
+    types: [labeled]
     paths:
-      - app.json
-      - eas.json
+      - src/**
+      - app.config.ts
       - package.json
-      - assets/app-icons/**
+      - assets/**
+
+concurrency:
+  cancel_in_progress: true
+  group: ${{ workflow.filename }}-${{ github.ref }}
 
 jobs:
-  # 1️⃣ Read app version
-  read_app_version:
-    name: read-app-version
-    type: custom
-    env:
-      EXPO_DEBUG: "1"
-    steps:
-      - uses: eas/checkout
-      - id: outputs
-        run: |
-          VER=$(node -p "require('./package.json').version")
-          set-output app_version "$VER"
-    outputs:
-      app_version: ${{ steps.outputs.outputs.app_version }}
-
-  # 2️⃣ Check for existing Android build
-  get_android_build:
-    name: check-android-build
-    needs: [read_app_version]
-    type: get-build
-    params:
-      platform: android
-      profile: production
-      runtime_version: ${{ needs.read_app_version.outputs.app_version }}
-      app_version: ${{ needs.read_app_version.outputs.app_version }}
-
-  # 3️⃣ Build Android (production) if missing
-  build_android:
-    name: build-android-production
-    needs: [get_android_build]
-    if: ${{ !needs.get_android_build.outputs.build_id }}
+  build_android_if_labeled:
+    name: Build Android (production)
+    if: ${{ github.event.label.name == 'build-all' || github.event.label.name == 'build-android' }}
     type: build
-    env:
-      EXPO_DEBUG: "1"
+    environment: production
     params:
       platform: android
       profile: production
 
-  # 4️⃣ Check for existing iOS build
-  get_ios_build:
-    name: check-ios-build
-    needs: [read_app_version]
-    type: get-build
-    params:
-      platform: ios
-      profile: production
-      runtime_version: ${{ needs.read_app_version.outputs.app_version }}
-      app_version: ${{ needs.read_app_version.outputs.app_version }}
-
-  # 5️⃣ Build iOS (production) if missing
-  build_ios:
-    name: build-ios-production
-    needs: [get_ios_build]
-    if: ${{ !needs.get_ios_build.outputs.build_id }}
-    type: build
-    env:
-      EXPO_DEBUG: "1"
-    params:
-      platform: ios
-      profile: production
+  # build_ios_if_labeled:
+  #   name: Build iOS (production)
+  #   if: ${{ github.event.label.name == 'build-all' || github.event.label.name == 'build-ios' }}
+  #   type: build
+  #   environment: production
+  #   params:
+  #     platform: ios
+  #     profile: production
