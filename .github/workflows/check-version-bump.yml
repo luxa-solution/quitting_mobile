@@ -1,4 +1,4 @@
-name: Check Version Bump
+name: check-version-bump
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   check-version:
-    name: Verify Version Bump
+    name: verify-version-bump
     runs-on: ubuntu-latest
     # Only run for staging or hotfix branches
     if: ${{ github.head_ref == 'staging' || startsWith(github.head_ref, 'hotfix/') }}
