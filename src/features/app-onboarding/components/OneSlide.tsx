@@ -1,6 +1,6 @@
 import { View, Text, Image, Dimensions } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
-import { AppButton } from '@/shared/components/AppButton';
+import { AppButton } from '@/shared/components';
 import { SlideData } from '../types';
 import { Progress } from './Progress';
 

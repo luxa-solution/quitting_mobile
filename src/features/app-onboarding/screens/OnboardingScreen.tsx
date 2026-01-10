@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { Href, router } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
   FlatList,
@@ -23,7 +23,7 @@ export function OnboardingScreen() {
     if (index < slide_data.length - 1) {
       listRef.current?.scrollToIndex({ index: index + 1 });
     } else {
-      router.replace('/auth/signup');
+      router.replace('/auth/signup' as Href);
     }
   };
 
@@ -51,7 +51,7 @@ export function OnboardingScreen() {
         />
       </View>
 
-      <Footer onSignIn={() => router.push('/auth/login')} />
+      <Footer onSignIn={() => router.push('/auth/login' as Href)} />
     </View>
   );
 }

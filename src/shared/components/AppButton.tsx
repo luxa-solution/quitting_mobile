@@ -1,4 +1,4 @@
-import { View, Text, Pressable } from 'react-native';
+import { Text, Pressable } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
 
 type Props = {

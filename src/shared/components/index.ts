@@ -1,6 +1,1 @@
-import { AppButton } from './AppButton';
-
-export { Button } from './Button';
-export { Container } from './Container';
-export { HeaderButton } from './HeaderButton';
-export { TabBarIcon } from './TabBarIcon';
+export { AppButton } from './AppButton';
