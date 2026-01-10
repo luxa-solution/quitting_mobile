@@ -1,10 +1,24 @@
+# .github/workflows/performance.yml
 name: Performance Monitoring
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    branches:
-      - main
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+    branches: [main]
+    paths:
+      - "src/**"
+      - "assets/**"
+      - "app.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "app.json"
+      - "eas.json"
+      - "metro.config.*"
+      - "tsconfig.json"
+      - ".github/workflows/**"
+      - ".eas/workflows/**"
+  push:
+    branches: [main]
     paths:
       - "src/**"
       - "assets/**"
@@ -41,16 +55,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const pr = context.payload.pull_request;
-            if (!pr) {
-              core.info('No pull_request payload found; skipping.');
-              return;
-            }
+            if (!pr) return;
 
             const sha = pr.head.sha;
             const checkName = 'branch-guard';
             const maxTries = 30;
             const delayMs = 10000;
-            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
 
             for (let attempt = 1; attempt <= maxTries; attempt++) {
               const { data } = await github.rest.checks.listForRef({
@@ -63,10 +74,7 @@ jobs:
               const run = (data.check_runs || []).find(r => r.name === checkName);
 
               if (run && run.status === 'completed') {
-                if (run.conclusion === 'success') {
-                  core.info('Branch guard passed.');
-                  return;
-                }
+                if (run.conclusion === 'success') return;
                 core.setFailed(`Branch guard ${run.conclusion}`);
                 return;
               }
@@ -111,7 +119,7 @@ jobs:
     if: github.event_name == 'push' && needs.changes.outputs.relevant == 'true'
     needs: changes
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     permissions:
       contents: read
       actions: write
@@ -151,112 +159,164 @@ jobs:
       - name: Export (Android only)
         run: pnpm expo export --platform android --output-dir dist-perf
 
-      - name: Generate baseline report (with best-effort filename de-hashing)
+      - name: Generate baseline report (A) + module list (B on main only)
         run: |
           node - <<'NODE'
           const fs = require('fs');
           const path = require('path');
+          const { execSync } = require('child_process');
+
+          const OUT_DIR = 'dist-perf';
 
           function walk(dir) {
-            let size = 0;
             let files = [];
             for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
               const p = path.join(dir, entry.name);
-              if (entry.isDirectory()) {
-                const r = walk(p);
-                size += r.size;
-                files = files.concat(r.files);
-              } else {
-                const st = fs.statSync(p);
-                size += st.size;
-                files.push({ file: p, size: st.size });
-              }
+              if (entry.isDirectory()) files = files.concat(walk(p));
+              else files.push({ file: p, size: fs.statSync(p).size });
             }
-            return { size, files };
+            return files;
           }
 
-          function safeReadJson(p) {
-            try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+          function summarize(outDir, files) {
+            const sum = { total: 0, js: 0, maps: 0, images: 0, fonts: 0, other: 0, byTopDir: {} };
+            for (const f of files) {
+              const rel = f.file.replace(outDir + path.sep, '').split(path.sep).join('/');
+              const ext = (rel.split('.').pop() || '').toLowerCase();
+              const topDir = rel.split('/')[0] || '(root)';
+
+              sum.total += f.size;
+              sum.byTopDir[topDir] = (sum.byTopDir[topDir] || 0) + f.size;
+
+              if (ext === 'js') sum.js += f.size;
+              else if (ext === 'map') sum.maps += f.size;
+              else if (['png','jpg','jpeg','webp','gif','svg'].includes(ext)) sum.images += f.size;
+              else if (['ttf','otf','woff','woff2'].includes(ext)) sum.fonts += f.size;
+              else sum.other += f.size;
+            }
+
+            const topDirs = Object.entries(sum.byTopDir)
+              .sort((a,b) => b[1] - a[1])
+              .slice(0, 8)
+              .map(([dir, bytes]) => ({ dir, bytes }));
+
+            return { ...sum, topDirs };
           }
 
-          // Build a map from exported file paths -> original asset hints (best effort).
-          function buildAssetHintMap(outDir) {
-            const hints = new Map();
-
-            const meta = safeReadJson(path.join(outDir, 'metadata.json'));
-            if (meta && Array.isArray(meta.assets)) {
-              for (const a of meta.assets) {
-                // Example fields vary; we try a few common ones:
-                const name = a.name || a.httpServerLocation || a.fileSystemLocation || a.type || 'asset';
-                const hashes = []
-                  .concat(a.fileHashes || [])
-                  .concat(a.hash ? [a.hash] : []);
-
-                // Not perfect, but helps when filenames include a hash.
-                for (const h of hashes) hints.set(String(h), String(name));
-              }
-            }
-
-            const assetMap = safeReadJson(path.join(outDir, 'assetmap.json'));
-            if (assetMap && Array.isArray(assetMap)) {
-              // Expo often writes an array of { "assetId", "files": [...], ... }
-              for (const a of assetMap) {
-                const hint = a.httpServerLocation || a.name || a.type || a.assetId;
-                const files = a.files || a.fileHashes || [];
-                for (const f of files) hints.set(String(f), String(hint));
-              }
-            }
-
-            return hints;
+          function findLargestJsBundle(outDir) {
+            const files = walk(outDir).filter(f => f.file.endsWith('.js'));
+            files.sort((a,b) => b.size - a.size);
+            return files[0]?.file || null;
           }
 
-          function hintForFile(rel, hintMap) {
-            // Try to extract a long hex-ish chunk from the filename and map it.
-            const base = path.basename(rel);
-            const m = base.match(/[a-f0-9]{16,}/i);
-            if (!m) return null;
-            const key = m[0].toLowerCase();
-            // direct match or partial match
-            if (hintMap.has(key)) return hintMap.get(key);
-            for (const [k, v] of hintMap.entries()) {
-              if (key.includes(k.toLowerCase()) || k.toLowerCase().includes(key)) return v;
-            }
+          function findSourcemap(bundlePath) {
+            const direct = `${bundlePath}.map`;
+            if (fs.existsSync(direct)) return direct;
+
+            try {
+              const tail = fs.readFileSync(bundlePath, 'utf8').split('\n').slice(-10).join('\n');
+              const m = tail.match(/sourceMappingURL=(.+)\s*$/m);
+              if (!m) return null;
+              const sm = m[1].trim();
+              const candidate = path.join(path.dirname(bundlePath), sm);
+              if (fs.existsSync(candidate)) return candidate;
+            } catch {}
             return null;
           }
 
-          const outDir = 'dist-perf';
-          const { size, files } = walk(outDir);
-          files.sort((a,b) => b.size - a.size);
+          function analyzeModules(outDir) {
+            try {
+              const bundle = findLargestJsBundle(outDir);
+              if (!bundle) return { bundle: null, sourcemap: null, topModules: [] };
 
-          const hintMap = buildAssetHintMap(outDir);
+              const map = findSourcemap(bundle);
+              if (!map) return { bundle: path.relative(process.cwd(), bundle), sourcemap: null, topModules: [] };
 
-          const top = files.slice(0, 15).map(f => {
-            const rel = f.file.replace(outDir + path.sep, '').replaceAll(path.sep, '/');
-            const hint = hintForFile(rel, hintMap);
-            return {
-              file: rel,
-              bytes: f.size,
-              hint: hint || undefined,
-            };
-          });
+              // Best-effort: some repos may not produce maps; do not fail baseline.
+              let out = '';
+              try {
+                out = execSync(`pnpm dlx source-map-explorer "${bundle}" --json`, {
+                  stdio: ['ignore', 'pipe', 'pipe'],
+                  maxBuffer: 50 * 1024 * 1024
+                }).toString('utf8');
+              } catch {
+                return { bundle: path.relative(process.cwd(), bundle), sourcemap: path.relative(process.cwd(), map), topModules: [] };
+              }
+
+              let parsed;
+              try { parsed = JSON.parse(out); } catch { return { bundle: path.relative(process.cwd(), bundle), sourcemap: path.relative(process.cwd(), map), topModules: [] }; }
+
+              let entries = [];
+              const addEntries = (obj) => {
+                if (obj?.bundles?.[0]?.files?.length) {
+                  for (const f of obj.bundles[0].files) {
+                    const name = f.file || f.name || f.module;
+                    const size = f.size ?? f.bytes ?? f.weight;
+                    if (name && Number.isFinite(size)) entries.push({ module: String(name), bytes: Number(size) });
+                  }
+                  return true;
+                }
+                if (obj?.files?.length) {
+                  for (const f of obj.files) {
+                    const name = f.file || f.name || f.module;
+                    const size = f.size ?? f.bytes ?? f.weight;
+                    if (name && Number.isFinite(size)) entries.push({ module: String(name), bytes: Number(size) });
+                  }
+                  return true;
+                }
+                if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+                  const kv = Object.entries(obj)
+                    .filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
+                    .map(([k, v]) => ({ module: String(k), bytes: Number(v) }));
+                  if (kv.length) { entries.push(...kv); return true; }
+                }
+                return false;
+              };
+              if (Array.isArray(parsed)) parsed.forEach(addEntries);
+              else addEntries(parsed);
+
+              entries = entries
+                .filter(e => e.bytes > 0)
+                .sort((a,b) => b.bytes - a.bytes)
+                .slice(0, 25);
+
+              return { bundle: path.relative(process.cwd(), bundle), sourcemap: path.relative(process.cwd(), map), topModules: entries };
+            } catch {
+              return { bundle: null, sourcemap: null, topModules: [] };
+            }
+          }
+
+          const files = walk(OUT_DIR);
+          const s = summarize(OUT_DIR, files);
 
           const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           const depCount = Object.keys(pkg.dependencies || {}).length;
 
+          const moduleAnalysis = analyzeModules(OUT_DIR);
+
           const report = {
-            branch: process.env.GITHUB_REF_NAME,
-            sha: process.env.GITHUB_SHA,
+            mode: 'baseline',
             generatedAt: new Date().toISOString(),
-            platform: "android",
-            exportDir: outDir,
-            exportBytes: size,
-            exportMB: (size / (1024 * 1024)).toFixed(2),
-            topFiles: top,
+            platform: 'android',
+            exportDir: OUT_DIR,
+
+            exportBytes: s.total,
+            jsBytes: s.js,
+            imageBytes: s.images,
+            fontBytes: s.fonts,
+            otherBytes: s.other,
+
+            topDirs: s.topDirs,
+
             depCount,
+            moduleAnalysis,
+
+            sha: process.env.GITHUB_SHA,
+            ref: process.env.GITHUB_REF,
           };
 
           fs.writeFileSync('perf-report.json', JSON.stringify(report, null, 2));
-          console.log('Baseline Size:', report.exportMB, 'MB');
+          console.log(`[perf] baseline total=${(s.total/(1024*1024)).toFixed(2)}MB js=${(s.js/(1024*1024)).toFixed(2)}MB modules=${moduleAnalysis.topModules.length}`);
           NODE
 
       - name: Upload baseline artifact
@@ -271,7 +331,7 @@ jobs:
     if: github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true' && needs.wait-for-branch-guard.result == 'success'
     needs: [wait-for-branch-guard, changes]
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     permissions:
       contents: read
       pull-requests: write
@@ -314,7 +374,7 @@ jobs:
       - name: Export (Android only)
         run: pnpm expo export --platform android --output-dir dist-perf
 
-      - name: Generate PR report (with best-effort filename de-hashing)
+      - name: Generate PR report (A only, no hashes)
         env:
           GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_BASE_REF: ${{ github.base_ref }}
@@ -323,101 +383,75 @@ jobs:
           const fs = require('fs');
           const path = require('path');
 
+          const OUT_DIR = 'dist-perf';
+
           function walk(dir) {
-            let size = 0;
             let files = [];
             for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
               const p = path.join(dir, entry.name);
-              if (entry.isDirectory()) {
-                const r = walk(p);
-                size += r.size;
-                files = files.concat(r.files);
-              } else {
-                const st = fs.statSync(p);
-                size += st.size;
-                files.push({ file: p, size: st.size });
-              }
+              if (entry.isDirectory()) files = files.concat(walk(p));
+              else files.push({ file: p, size: fs.statSync(p).size });
             }
-            return { size, files };
+            return files;
           }
 
-          function safeReadJson(p) {
-            try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
-          }
+          function summarize(outDir, files) {
+            const sum = { total: 0, js: 0, maps: 0, images: 0, fonts: 0, other: 0, byTopDir: {} };
+            for (const f of files) {
+              const rel = f.file.replace(outDir + path.sep, '').split(path.sep).join('/');
+              const ext = (rel.split('.').pop() || '').toLowerCase();
+              const topDir = rel.split('/')[0] || '(root)';
 
-          function buildAssetHintMap(outDir) {
-            const hints = new Map();
+              sum.total += f.size;
+              sum.byTopDir[topDir] = (sum.byTopDir[topDir] || 0) + f.size;
 
-            const meta = safeReadJson(path.join(outDir, 'metadata.json'));
-            if (meta && Array.isArray(meta.assets)) {
-              for (const a of meta.assets) {
-                const name = a.name || a.httpServerLocation || a.fileSystemLocation || a.type || 'asset';
-                const hashes = []
-                  .concat(a.fileHashes || [])
-                  .concat(a.hash ? [a.hash] : []);
-                for (const h of hashes) hints.set(String(h), String(name));
-              }
+              if (ext === 'js') sum.js += f.size;
+              else if (ext === 'map') sum.maps += f.size;
+              else if (['png','jpg','jpeg','webp','gif','svg'].includes(ext)) sum.images += f.size;
+              else if (['ttf','otf','woff','woff2'].includes(ext)) sum.fonts += f.size;
+              else sum.other += f.size;
             }
 
-            const assetMap = safeReadJson(path.join(outDir, 'assetmap.json'));
-            if (assetMap && Array.isArray(assetMap)) {
-              for (const a of assetMap) {
-                const hint = a.httpServerLocation || a.name || a.type || a.assetId;
-                const files = a.files || a.fileHashes || [];
-                for (const f of files) hints.set(String(f), String(hint));
-              }
-            }
+            const topDirs = Object.entries(sum.byTopDir)
+              .sort((a,b) => b[1] - a[1])
+              .slice(0, 8)
+              .map(([dir, bytes]) => ({ dir, bytes }));
 
-            return hints;
+            return { ...sum, topDirs };
           }
 
-          function hintForFile(rel, hintMap) {
-            const base = path.basename(rel);
-            const m = base.match(/[a-f0-9]{16,}/i);
-            if (!m) return null;
-            const key = m[0].toLowerCase();
-            if (hintMap.has(key)) return hintMap.get(key);
-            for (const [k, v] of hintMap.entries()) {
-              const kk = k.toLowerCase();
-              if (key.includes(kk) || kk.includes(key)) return v;
-            }
-            return null;
-          }
-
-          const outDir = 'dist-perf';
-          const { size, files } = walk(outDir);
-          files.sort((a,b) => b.size - a.size);
-
-          const hintMap = buildAssetHintMap(outDir);
-
-          const top = files.slice(0, 15).map(f => {
-            const rel = f.file.replace(outDir + path.sep, '').replaceAll(path.sep, '/');
-            const hint = hintForFile(rel, hintMap);
-            return {
-              file: rel,
-              bytes: f.size,
-              hint: hint || undefined,
-            };
-          });
+          const files = walk(OUT_DIR);
+          const s = summarize(OUT_DIR, files);
 
           const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           const depCount = Object.keys(pkg.dependencies || {}).length;
 
           const report = {
+            mode: 'pr',
+            generatedAt: new Date().toISOString(),
+            platform: 'android',
+            exportDir: OUT_DIR,
+
+            exportBytes: s.total,
+            jsBytes: s.js,
+            imageBytes: s.images,
+            fontBytes: s.fonts,
+            otherBytes: s.other,
+
+            topDirs: s.topDirs,
+
+            depCount,
+
             prNumber: process.env.GITHUB_PR_NUMBER,
             baseBranch: process.env.GITHUB_BASE_REF,
-            headSha: process.env.GITHUB_SHA,
-            generatedAt: new Date().toISOString(),
-            platform: "android",
-            exportDir: outDir,
-            exportBytes: size,
-            exportMB: (size / (1024 * 1024)).toFixed(2),
-            topFiles: top,
-            depCount,
+            sha: process.env.GITHUB_SHA,
+            ref: process.env.GITHUB_REF,
+
+            moduleAnalysis: { bundle: null, sourcemap: null, topModules: [] } // filled only if deep-gated
           };
 
           fs.writeFileSync('perf-report.json', JSON.stringify(report, null, 2));
-          console.log('PR Size:', report.exportMB, 'MB');
+          console.log(`[perf] pr total=${(s.total/(1024*1024)).toFixed(2)}MB js=${(s.js/(1024*1024)).toFixed(2)}MB`);
           NODE
 
       - name: Download baseline
@@ -429,7 +463,172 @@ jobs:
           name: perf-baseline-main
           path: baseline
 
-      - name: Build PR comment (table + warnings + top files)
+      - name: Decide whether to run deep analysis (label perf-deep OR size delta threshold)
+        id: gate
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            const labels = (context.payload.pull_request.labels || []).map(l => l.name);
+            const hasLabel = labels.includes('perf-deep');
+
+            const WARN_DELTA_MB = 0.5;
+            const WARN_DELTA_PCT = 5;
+
+            const pr = JSON.parse(fs.readFileSync('perf-report.json', 'utf8'));
+            const basePath = 'baseline/perf-report.json';
+
+            let shouldDeep = false;
+            let reason = '';
+
+            if (hasLabel) {
+              shouldDeep = true;
+              reason = 'label perf-deep';
+            } else if (fs.existsSync(basePath)) {
+              const base = JSON.parse(fs.readFileSync(basePath, 'utf8'));
+              const delta = pr.exportBytes - (base.exportBytes ?? 0);
+              const pct = (base.exportBytes ?? 0) > 0 ? (delta / base.exportBytes) * 100 : 0;
+
+              if (delta >= WARN_DELTA_MB * 1024 * 1024) {
+                shouldDeep = true;
+                reason = `delta ≥ ${WARN_DELTA_MB}MB`;
+              } else if (pct >= WARN_DELTA_PCT) {
+                shouldDeep = true;
+                reason = `delta ≥ ${WARN_DELTA_PCT}%`;
+              } else {
+                reason = 'below thresholds and no perf-deep label';
+              }
+            } else {
+              reason = 'no baseline and no perf-deep label';
+            }
+
+            core.setOutput('should_deep', shouldDeep ? 'true' : 'false');
+            core.setOutput('reason', reason);
+
+      - name: Deep module analysis (B) via sourcemaps (gated)
+        if: steps.gate.outputs.should_deep == 'true'
+        continue-on-error: true
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const { execSync } = require('child_process');
+
+          const OUT_DIR = 'dist-perf';
+
+          function walk(dir) {
+            let files = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const p = path.join(dir, entry.name);
+              if (entry.isDirectory()) files = files.concat(walk(p));
+              else files.push({ file: p, size: fs.statSync(p).size });
+            }
+            return files;
+          }
+
+          function findLargestJsBundle(outDir) {
+            const files = walk(outDir).filter(f => f.file.endsWith('.js'));
+            files.sort((a,b) => b.size - a.size);
+            return files[0]?.file || null;
+          }
+
+          function findSourcemap(bundlePath) {
+            const direct = `${bundlePath}.map`;
+            if (fs.existsSync(direct)) return direct;
+
+            try {
+              const tail = fs.readFileSync(bundlePath, 'utf8').split('\n').slice(-10).join('\n');
+              const m = tail.match(/sourceMappingURL=(.+)\s*$/m);
+              if (!m) return null;
+              const sm = m[1].trim();
+              const candidate = path.join(path.dirname(bundlePath), sm);
+              if (fs.existsSync(candidate)) return candidate;
+            } catch {}
+            return null;
+          }
+
+          function parseSME(jsonText) {
+            let parsed;
+            try { parsed = JSON.parse(jsonText); } catch { return []; }
+
+            let entries = [];
+            const addEntries = (obj) => {
+              if (obj?.bundles?.[0]?.files?.length) {
+                for (const f of obj.bundles[0].files) {
+                  const name = f.file || f.name || f.module;
+                  const size = f.size ?? f.bytes ?? f.weight;
+                  if (name && Number.isFinite(size)) entries.push({ module: String(name), bytes: Number(size) });
+                }
+                return true;
+              }
+              if (obj?.files?.length) {
+                for (const f of obj.files) {
+                  const name = f.file || f.name || f.module;
+                  const size = f.size ?? f.bytes ?? f.weight;
+                  if (name && Number.isFinite(size)) entries.push({ module: String(name), bytes: Number(size) });
+                }
+                return true;
+              }
+              if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+                const kv = Object.entries(obj)
+                  .filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
+                  .map(([k, v]) => ({ module: String(k), bytes: Number(v) }));
+                if (kv.length) { entries.push(...kv); return true; }
+              }
+              return false;
+            };
+            if (Array.isArray(parsed)) parsed.forEach(addEntries);
+            else addEntries(parsed);
+
+            return entries
+              .filter(e => e.bytes > 0)
+              .sort((a,b) => b.bytes - a.bytes)
+              .slice(0, 25);
+          }
+
+          const bundle = findLargestJsBundle(OUT_DIR);
+          if (!bundle) {
+            console.log('[perf] deep: no JS bundle found');
+            process.exit(0);
+          }
+
+          const map = findSourcemap(bundle);
+          if (!map) {
+            console.log('[perf] deep: no sourcemap found; skipping');
+            process.exit(0);
+          }
+
+          let out = '';
+          try {
+            out = execSync(`pnpm dlx source-map-explorer "${bundle}" --json`, {
+              stdio: ['ignore', 'pipe', 'pipe'],
+              maxBuffer: 50 * 1024 * 1024
+            }).toString('utf8');
+          } catch (e) {
+            console.log('[perf] deep: source-map-explorer failed');
+            process.exit(0);
+          }
+
+          const topModules = parseSME(out);
+
+          const pr = JSON.parse(fs.readFileSync('perf-report.json', 'utf8'));
+          pr.moduleAnalysis = {
+            bundle: path.relative(process.cwd(), bundle),
+            sourcemap: path.relative(process.cwd(), map),
+            topModules
+          };
+          fs.writeFileSync('perf-report.json', JSON.stringify(pr, null, 2));
+
+          console.log(`[perf] deep: modules=${topModules.length}`);
+          NODE
+
+      - name: Build PR comment (A always, B gated)
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          DEEP_SHOULD: ${{ steps.gate.outputs.should_deep }}
+          DEEP_REASON: ${{ steps.gate.outputs.reason }}
         run: |
           node - <<'NODE'
           const fs = require('fs');
@@ -438,108 +637,151 @@ jobs:
           const basePath = 'baseline/perf-report.json';
           const base = fs.existsSync(basePath) ? JSON.parse(fs.readFileSync(basePath, 'utf8')) : null;
 
+          const WARN_ABS_MB = 10;
+          const WARN_DELTA_MB = 0.5;
+          const WARN_DELTA_PCT = 5;
+
           const mb = (bytes) => bytes / (1024 * 1024);
           const fmtMB = (bytes) => `${mb(bytes).toFixed(2)} MB`;
 
-          // ---- Tune thresholds here ----
-          const WARN_ABS_MB = 10;      // warn if total export > 10MB
-          const WARN_DELTA_MB = 0.5;   // warn if increase >= 0.5MB
-          const WARN_DELTA_PCT = 5;    // warn if increase >= 5%
-          const LARGE_FILE_KB = 200;   // highlight > 200KB
-          const HUGE_FILE_KB = 500;    // warn > 500KB
-          // ------------------------------
+          const haveBase = typeof base?.exportBytes === 'number';
 
-          const prBytes = pr.exportBytes;
-          const baseBytes = base?.exportBytes;
+          function fmtDelta(deltaBytes, baseBytes) {
+            const sign = deltaBytes >= 0 ? '+' : '';
+            const pct = baseBytes > 0 ? (deltaBytes / baseBytes) * 100 : 0;
+            return `${sign}${fmtMB(deltaBytes)} (${sign}${pct.toFixed(1)}%)`;
+          }
+
+          const metrics = [
+            ['Total export', pr.exportBytes, base?.exportBytes],
+            ['JS bundles', pr.jsBytes, base?.jsBytes],
+            ['Images', pr.imageBytes, base?.imageBytes],
+            ['Fonts', pr.fontBytes, base?.fontBytes],
+            ['Other', pr.otherBytes, base?.otherBytes],
+          ];
 
           let warn = false;
-          let deltaText = '_No baseline found yet. (Merge to update baseline.)_';
-          let depDeltaText = '—';
+          const warnings = [];
 
-          if (mb(prBytes) >= WARN_ABS_MB) warn = true;
+          if (mb(pr.exportBytes) >= WARN_ABS_MB) {
+            warn = true;
+            warnings.push(`Total export size is ≥ ${WARN_ABS_MB} MB`);
+          }
 
-          if (typeof baseBytes === 'number') {
-            const delta = prBytes - baseBytes;
-            const pct = baseBytes > 0 ? (delta / baseBytes) * 100 : 0;
-            const sign = delta >= 0 ? '+' : '';
-            deltaText = `${sign}${fmtMB(delta)} (${sign}${pct.toFixed(1)}%)`;
-
-            const depDelta = pr.depCount - (base.depCount ?? 0);
-            const depSign = depDelta >= 0 ? '+' : '';
-            depDeltaText = `${pr.depCount} (${depSign}${depDelta})`;
-
-            if (delta >= WARN_DELTA_MB * 1024 * 1024 || pct >= WARN_DELTA_PCT) warn = true;
+          if (haveBase) {
+            const delta = pr.exportBytes - base.exportBytes;
+            const pct = base.exportBytes > 0 ? (delta / base.exportBytes) * 100 : 0;
+            if (delta >= WARN_DELTA_MB * 1024 * 1024) {
+              warn = true;
+              warnings.push(`Total size increased by ≥ ${WARN_DELTA_MB} MB vs baseline`);
+            }
+            if (pct >= WARN_DELTA_PCT) {
+              warn = true;
+              warnings.push(`Total size increased by ≥ ${WARN_DELTA_PCT}% vs baseline`);
+            }
           } else {
-            depDeltaText = `${pr.depCount}`;
+            warnings.push('No baseline found yet (merge to main to establish baseline).');
           }
-
-          const huge = [];
-          const large = [];
-          for (const f of pr.topFiles || []) {
-            const kb = f.bytes / 1024;
-            const label = f.hint ? `${f.file}  ←  ${f.hint}` : f.file;
-            if (kb >= HUGE_FILE_KB) huge.push(`${label} (${kb.toFixed(0)} KB)`);
-            else if (kb >= LARGE_FILE_KB) large.push(`${label} (${kb.toFixed(0)} KB)`);
-          }
-          if (huge.length) warn = true;
 
           const icon = warn ? '⚠️' : '✅';
           const title = warn ? 'Performance review needed' : 'Performance looks OK';
 
-          const top10 = (pr.topFiles || [])
-            .slice(0, 10)
-            .map(t => {
-              const kb = (t.bytes/1024).toFixed(0);
-              const label = t.hint ? `${t.file}  ←  ${t.hint}` : t.file;
-              return `${kb} KB\t${label}`;
-            })
-            .join('\n');
+          const breakdownRows = metrics.map(([label, prBytes, baseBytes]) => {
+            if (!haveBase || typeof baseBytes !== 'number') return `| ${label} | **${fmtMB(prBytes)}** | — |`;
+            return `| ${label} | **${fmtMB(prBytes)}** | ${fmtDelta(prBytes - baseBytes, baseBytes)} |`;
+          }).join('\n');
 
-          const warnings = [];
-          if (mb(prBytes) >= WARN_ABS_MB) warnings.push(`Export size is ≥ ${WARN_ABS_MB} MB`);
-          if (typeof baseBytes === 'number') {
-            const delta = prBytes - baseBytes;
-            const pct = baseBytes > 0 ? (delta / baseBytes) * 100 : 0;
-            if (delta >= WARN_DELTA_MB * 1024 * 1024) warnings.push(`Size increased by ≥ ${WARN_DELTA_MB} MB vs baseline`);
-            if (pct >= WARN_DELTA_PCT) warnings.push(`Size increased by ≥ ${WARN_DELTA_PCT}% vs baseline`);
+          const depDeltaText = (() => {
+            if (!haveBase) return `${pr.depCount}`;
+            const d = pr.depCount - (base.depCount ?? 0);
+            const sign = d >= 0 ? '+' : '';
+            return `${pr.depCount} (${sign}${d})`;
+          })();
+
+          const topDirs = (pr.topDirs || [])
+            .map(d => `- \`${d.dir}\`: ${fmtMB(d.bytes)}`)
+            .join('\n') || '_No directory summary available._';
+
+          // B section (gated)
+          const deepShould = process.env.DEEP_SHOULD === 'true';
+          const deepReason = process.env.DEEP_REASON || 'n/a';
+
+          const prMods = pr.moduleAnalysis?.topModules || [];
+          const baseMods = base?.moduleAnalysis?.topModules || [];
+          const baseMap = new Map(baseMods.map(m => [m.module, m.bytes]));
+
+          const modLines = prMods.slice(0, 15).map(m => {
+            const b = baseMap.get(m.module);
+            if (typeof b === 'number') {
+              const delta = m.bytes - b;
+              const sign = delta >= 0 ? '+' : '';
+              return `${(m.bytes/1024).toFixed(0)} KB (${sign}${(delta/1024).toFixed(0)} KB)\t${m.module}`;
+            }
+            return `${(m.bytes/1024).toFixed(0)} KB\t${m.module}`;
+          }).join('\n');
+
+          let moduleBlock = '';
+          if (!deepShould) {
+            moduleBlock = `
+          <details>
+          <summary>Root-cause (top modules)</summary>
+
+          _Skipped (gate): ${deepReason}._  
+          _Add label \`perf-deep\` to force this analysis._
+          </details>
+            `.replace(/^ {10}/gm, '').trim();
+          } else if (prMods.length) {
+            moduleBlock = `
+          <details>
+          <summary>Root-cause (top modules by bundle contribution)</summary>
+
+          _Bundle:_ \`${pr.moduleAnalysis.bundle || 'unknown'}\`  
+          ${pr.moduleAnalysis.sourcemap ? `_Sourcemap:_ \`${pr.moduleAnalysis.sourcemap}\`` : '_Sourcemap:_ not found'}
+
+          \`\`\`text
+          ${modLines}
+          \`\`\`
+
+          _If deltas are shown in parentheses, they compare to baseline’s module list (when available)._
+          </details>
+            `.replace(/^ {10}/gm, '').trim();
+          } else {
+            moduleBlock = `
+          <details>
+          <summary>Root-cause (top modules)</summary>
+
+          _Attempted but no module data was produced (missing sourcemaps or analyzer output)._
+          </details>
+            `.replace(/^ {10}/gm, '').trim();
           }
-          if (huge.length) warnings.push(`Found ${huge.length} file(s) ≥ ${HUGE_FILE_KB} KB`);
 
           const warningBlock = warnings.length
             ? `### ⚠️ Warnings\n${warnings.map(w => `- ${w}`).join('\n')}\n`
             : `### ✅ No warnings\n`;
 
-          const hugeBlock = huge.length
-            ? `<details>\n<summary>Huge files (≥ ${HUGE_FILE_KB} KB)</summary>\n\n\`\`\`text\n${huge.join('\n')}\n\`\`\`\n</details>\n`
-            : '';
-
-          const largeBlock = large.length
-            ? `<details>\n<summary>Large files (≥ ${LARGE_FILE_KB} KB)</summary>\n\n\`\`\`text\n${large.join('\n')}\n\`\`\`\n</details>\n`
-            : '';
-
           const body = `
           ## ${icon} Performance (export size) — ${title}
 
-          | Metric | Value |
+          | Metric | PR | Δ vs baseline |
+          | :--- | ---: | ---: |
+          ${breakdownRows}
+
+          | Other | Value |
           | :--- | :--- |
-          | **Target branch** | \`${process.env.GITHUB_BASE_REF}\` |
-          | **PR export size (android)** | **${fmtMB(prBytes)}** |
-          | **Δ vs baseline** | ${deltaText} |
+          | **Target branch** | \`${process.env.GITHUB_BASE_REF || pr.baseBranch || 'main'}\` |
           | **Dependencies** | ${depDeltaText} |
 
           ${warningBlock}
 
           <details>
-          <summary>Largest files (top 10)</summary>
+          <summary>Where the bytes live (top directories)</summary>
 
-          \`\`\`text
-          ${top10}
-          \`\`\`
+          ${topDirs}
           </details>
 
-          ${hugeBlock}
-          ${largeBlock}
+          ${moduleBlock}
 
+          ---
           _Info-only. This does not block merges._  
           _Calculated via Expo Export (Android)._
           `.replace(/^ {10}/gm, '').trim();
@@ -577,3 +819,12 @@ jobs:
                 owner, repo, issue_number, body,
               });
             }
+
+      - name: Upload perf artifacts (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-${{ github.run_id }}
+          path: |
+            perf-report.json
+            perf-comment.md
+          retention-days: 30
