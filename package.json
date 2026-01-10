@@ -13,6 +13,8 @@
     "lint": "eslint \"**/*.{js,jsx,ts,tsx}\" && prettier -c \"**/*.{js,jsx,ts,tsx,json}\"",
     "format": "eslint \"**/*.{js,jsx,ts,tsx}\" --fix && prettier \"**/*.{js,jsx,ts,tsx,json}\" --write",
     "test": "jest",
+    "test:cov": "jest --coverage --watchAll=false",
+    "test:prepush": "jest --changedSince=origin/develop --passWithNoTests",
     "prepare": "husky"
   },
   "dependencies": {
