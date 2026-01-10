@@ -42,47 +42,59 @@ jobs:
               // main: only from staging, hotfix/*, release/*
               allowed =
                 head === 'staging' ||
-                head === 'release' ||
-                head.startsWith('hotfix/') ||
-                head.startsWith('release/');
+                head.startsWith('hotfix/');
 
               explanation = [
                 'Allowed PR sources into `production`:',
                 '- `staging`',
-                '- `release`',
                 '- `hotfix/*`',
-                '- `release/*`',
               ].join('\n');
 
             } else if (base === 'staging') {
-              // staging: only from develop OR hotfix/*
-              allowed = head === 'develop' || head.startsWith('hotfix/');
+              // staging: only from main OR hotfix/*
+              allowed = head === 'main' || head.startsWith('hotfix/');
               explanation = [
                 'Allowed PR sources into `staging`:',
-                '- `develop` (Standard Integration Flow)',
+                '- `main` (Standard Integration Flow)',
                 '- `hotfix/*` (Direct Hotfix Propagation)',
               ].join('\n');
 
             } else if (base === 'main') {
               // develop: feature/*, bugfix/*, ... OR hotfix/*
               const allowedPrefixes = [
+                // Your existing
                 'feature/',
                 'bugfix/',
-                'release/',
                 'refactor/',
                 'docs/',
                 'test/',
                 'chore/',
                 'hotfix/',
+
+                // Conventional-commit-ish aliases / common variants
+                'feat/',
+                'fix/',
+                'perf/',
+                'ci/',
+                'build/',
+                'style/',
+                'revert/',
+
+                // Optional but practical in real repos
+                'deps/',
+                'security/',
+                'i18n/',
+                'ui/',
+                'ux/',
               ];
 
               allowed = startsWithOneOf(head, allowedPrefixes);
 
               explanation = [
                 'Allowed PR sources into `main`:',
-                '- `feature/*`, `bugfix/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*` (New Work)',
-                '- `hotfix/*` (Standard Development and Hotfix Propagation)',
-                '- `release/*` (Cross-Propagation)',
+                '- Work branches: `feature/*`, `feat/*`, `bugfix/*`, `fix/*`, `refactor/*`, `perf/*`, `style/*`',
+                '- Support branches: `docs/*`, `test/*`, `chore/*`, `ci/*`, `build/*`, `deps/*`, `security/*`, `i18n/*`, `ui/*`, `ux/*`',
+                '- `hotfix/*`, `revert/*`',
               ].join('\n');
             } else {
               core.info(`Branch Guard: no rules defined for target "${base}", skipping validation.`);
