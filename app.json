@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Template App",
-    "slug": "template",
-    "version": "0.0.1",
+    "name": "Quitting",
+    "slug": "quittingmobile",
+    "version": "0.0.2",
     "newArchEnabled": true,
     "scheme": "com.luxasolution.template",
     "platforms": ["ios", "android"],
@@ -12,28 +12,43 @@
       "tsconfigPaths": true
     },
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/app-icons/ios-light.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/app-icons/splash-icon-light.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#ffffff",
+      "dark": {
+        "image": "./assets/app-icons/splash-icon-dark.png",
+        "backgroundColor": "#000000"
+      }
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.luxasolution.template"
+      "bundleIdentifier": "com.luxasolution.quitting",
+      "icon": "./assets/app-icons/ios-light.png",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/app-icons/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.luxasolution.template",
+      "package": "com.luxasolution.quitting",
       "edgeToEdgeEnabled": true
     },
     "runtimeVersion": {
       "policy": "appVersion"
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "da8523e0-5bbe-46ba-8a73-73b919fce765"
+      }
+    },
+    "owner": "luxa-digitals"
   }
 }

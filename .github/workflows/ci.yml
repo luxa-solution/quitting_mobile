@@ -1,39 +1,77 @@
-name: CI
+name: ci
 
 on:
-  push:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - main
       - staging
-      - develop
-      - 'feature/*'
-      - 'bugfix/*'
-      - 'hotfix/*'
-  pull_request: # Trigger directly on PR events for visible checks
-    types: [opened, synchronize, reopened]
-    branches:
-      - develop
-      - staging
-      - main
+      - production
+    paths:
+      - 'src/**'
+      - 'assets/**'
+      - 'app.config.ts'
+      - 'package.json'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  checks: read
+  contents: read
+  pull-requests: write
 
 jobs:
-  guard: # RUN THE GUARD FIRST
-    name: Branch Flow Guard Check
+  wait-for-branch-guard:
+    runs-on: ubuntu-latest
     permissions:
-      pull-requests: write 
+      checks: read
       contents: read
-    # Use the correct local path for the reusable workflow
-    uses: ./.github/workflows/pr-branch-guard.yml 
-    with:
-      head_ref: ${{ github.head_ref }}
-      base_ref: ${{ github.base_ref }}
-      pr_number: ${{ github.event.pull_request.number || 0 }}
-      event_name: ${{ github.event_name }}
+    steps:
+      - name: Skip for non-PR events
+        run: echo "Non-PR event; skipping branch guard wait."
+
+      - name: Wait for PR Branch Guard
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const sha = context.payload.pull_request.head.sha;
+            const checkName = 'branch-guard';
+            const maxTries = 30;
+            const delayMs = 10000;
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+            for (let attempt = 1; attempt <= maxTries; attempt++) {
+              const { data } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: sha,
+                check_name: checkName,
+              });
+
+              const run = data.check_runs.find(r => r.name === checkName);
+
+              if (run && run.status === 'completed') {
+                if (run.conclusion === 'success') {
+                  core.info('Branch guard passed.');
+                  return;
+                }
+
+                core.setFailed(`Branch guard ${run.conclusion}`);
+                return;
+              }
+
+              core.info(`Branch guard not finished (try ${attempt}/${maxTries}); waiting ${delayMs / 1000}s`);
+              await sleep(delayMs);
+            }
+
+            core.setFailed('Branch guard did not complete in time.');
 
   lint:
-    name: Lint & Type Check
-    needs: guard # Depends on the guard check
-    if: needs.guard.result == 'success' # Check job result
+    needs: wait-for-branch-guard # Depends on the guard check
+    if: needs.wait-for-branch-guard.result == 'success' 
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -73,9 +111,8 @@ jobs:
         run: pnpm tsc --noEmit
 
   test:
-    name: Run Tests
-    needs: guard # Depends on the guard check
-    if: needs.guard.result == 'success' # Check job result
+    needs: wait-for-branch-guard # Depends on the guard check
+    if: needs.wait-for-branch-guard.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -119,9 +156,8 @@ jobs:
         if: always()
 
   build:
-    name: Build App
-    needs: guard # Depends on the guard check
-    if: needs.guard.result == 'success' # Check job result
+    needs: wait-for-branch-guard # Depends on the guard check
+    if: needs.wait-for-branch-guard.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -164,9 +200,8 @@ jobs:
         run: pnpm expo export --platform all
 
   security:
-    name: Security Audit
-    needs: guard # Depends on the guard check
-    if: needs.guard.result == 'success' # Check job result
+    needs: wait-for-branch-guard # Depends on the guard check
+    if: needs.wait-for-branch-guard.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

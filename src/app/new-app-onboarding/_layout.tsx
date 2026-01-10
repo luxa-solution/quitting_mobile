@@ -13,6 +13,7 @@ function AppOnboardingLayout() {
         headerTitleStyle: {
           color: theme.colors.typography,
         },
+        headerShown: false,
       }}>
       <Stack.Screen name="index" />
     </Stack>

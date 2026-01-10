@@ -1,58 +1,131 @@
+# .github/workflows/performance.yml
 name: Performance Monitoring
 
 on:
-  push: 
-    branches: 
-      - main
-  schedule:
-    - cron: "0 0 * * 0" # Weekly on Sunday
-  pull_request: # Trigger directly on PR events for visible checks
-    types: [opened, synchronize, reopened]
-    branches:
-      - develop
-      - staging
-      - main
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+    branches: [main]
+    paths:
+      - "src/**"
+      - "assets/**"
+      - "app.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "app.json"
+      - "eas.json"
+      - "metro.config.*"
+      - "tsconfig.json"
+      - ".github/workflows/**"
+      - ".eas/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "assets/**"
+      - "app.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "app.json"
+      - "eas.json"
+      - "metro.config.*"
+      - "tsconfig.json"
+      - ".github/workflows/**"
+      - ".eas/workflows/**"
+
+concurrency:
+  group: perf-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  guard: # RUN THE GUARD FIRST
-    name: Branch Flow Guard Check
-    permissions:
-      pull-requests: write 
-      contents: read
-    # Use the correct local path for the reusable workflow
-    uses: ./.github/workflows/pr-branch-guard.yml 
-    with:
-      head_ref: ${{ github.head_ref }}
-      base_ref: ${{ github.base_ref }}
-      pr_number: ${{ github.event.pull_request.number || 0 }}
-      event_name: ${{ github.event_name }}
-
-  performance-metrics:
-    name: React Native Performance
-    # Only run on successful guard check OR non-PR events (push, schedule)
-    if: github.event_name != 'pull_request' || needs.guard.result == 'success'
-    needs: guard
+  wait-for-branch-guard:
+    name: Wait for branch-guard
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
-      pull-requests: write
+      checks: read
       contents: read
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-
-      - name: Get PR number
-        if: github.event_name == 'pull_request' 
-        id: pr
+      - name: Wait for PR Branch Guard
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const pr = context.payload.pull_request;
-            core.setOutput('number', pr.number);
-            core.info(`Found PR #${pr.number}`);
-            
+            if (!pr) return;
+
+            const sha = pr.head.sha;
+            const checkName = 'branch-guard';
+            const maxTries = 30;
+            const delayMs = 10000;
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+            for (let attempt = 1; attempt <= maxTries; attempt++) {
+              const { data } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: sha,
+                check_name: checkName,
+              });
+
+              const run = (data.check_runs || []).find(r => r.name === checkName);
+
+              if (run && run.status === 'completed') {
+                if (run.conclusion === 'success') return;
+                core.setFailed(`Branch guard ${run.conclusion}`);
+                return;
+              }
+
+              core.info(`Branch guard not finished (try ${attempt}/${maxTries}); waiting ${delayMs/1000}s`);
+              await sleep(delayMs);
+            }
+
+            core.setFailed('Branch guard did not complete in time.');
+
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'src/**'
+              - 'assets/**'
+              - 'app.config.*'
+              - 'metro.config.*'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - '.npmrc'
+              - 'tsconfig.json'
+              - '.github/workflows/**'
+              - '.eas/workflows/**'
+              - 'app.json'
+              - 'eas.json'
+
+  perf_baseline:
+    name: Baseline snapshot (push)
+    if: github.event_name == 'push' && needs.changes.outputs.relevant == 'true'
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -74,150 +147,684 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Analyze dependencies
-        id: deps
+      - name: Export (Android only)
+        run: pnpm expo export --platform android --output-dir dist-perf
+
+      - name: Generate baseline report (A) + module list (B on main only)
         run: |
-          TOTAL_DEPS=$(pnpm list --depth=Infinity --json | jq '[.. | .dependencies? | select(. != null) | keys] | add | unique | length')
-          DIRECT_DEPS=$(cat package.json | jq '.dependencies | length')
-          DEV_DEPS=$(cat package.json | jq '.devDependencies | length')
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const { execSync } = require('child_process');
 
-          echo "total=$TOTAL_DEPS" >> $GITHUB_OUTPUT
-          echo "direct=$DIRECT_DEPS" >> $GITHUB_OUTPUT
-          echo "dev=$DEV_DEPS" >> $GITHUB_OUTPUT
+          const OUT_DIR = 'dist-perf';
 
-      - name: Check for heavy dependencies
-        id: heavy
+          function walk(dir) {
+            let files = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const p = path.join(dir, entry.name);
+              if (entry.isDirectory()) files = files.concat(walk(p));
+              else files.push({ file: p, size: fs.statSync(p).size });
+            }
+            return files;
+          }
+
+          function summarize(outDir, files) {
+            const sum = { total: 0, js: 0, maps: 0, images: 0, fonts: 0, other: 0, byTopDir: {} };
+            for (const f of files) {
+              const rel = f.file.replace(outDir + path.sep, '').split(path.sep).join('/');
+              const ext = (rel.split('.').pop() || '').toLowerCase();
+              const topDir = rel.split('/')[0] || '(root)';
+
+              sum.total += f.size;
+              sum.byTopDir[topDir] = (sum.byTopDir[topDir] || 0) + f.size;
+
+              if (ext === 'js') sum.js += f.size;
+              else if (ext === 'map') sum.maps += f.size;
+              else if (['png','jpg','jpeg','webp','gif','svg'].includes(ext)) sum.images += f.size;
+              else if (['ttf','otf','woff','woff2'].includes(ext)) sum.fonts += f.size;
+              else sum.other += f.size;
+            }
+
+            const topDirs = Object.entries(sum.byTopDir)
+              .sort((a,b) => b[1] - a[1])
+              .slice(0, 8)
+              .map(([dir, bytes]) => ({ dir, bytes }));
+
+            return { ...sum, topDirs };
+          }
+
+          function findLargestJsBundle(outDir) {
+            const files = walk(outDir).filter(f => f.file.endsWith('.js'));
+            files.sort((a,b) => b.size - a.size);
+            return files[0]?.file || null;
+          }
+
+          function findSourcemap(bundlePath) {
+            const direct = `${bundlePath}.map`;
+            if (fs.existsSync(direct)) return direct;
+
+            try {
+              const tail = fs.readFileSync(bundlePath, 'utf8').split('\n').slice(-10).join('\n');
+              const m = tail.match(/sourceMappingURL=(.+)\s*$/m);
+              if (!m) return null;
+              const sm = m[1].trim();
+              const candidate = path.join(path.dirname(bundlePath), sm);
+              if (fs.existsSync(candidate)) return candidate;
+            } catch {}
+            return null;
+          }
+
+          function analyzeModules(outDir) {
+            try {
+              const bundle = findLargestJsBundle(outDir);
+              if (!bundle) return { bundle: null, sourcemap: null, topModules: [] };
+
+              const map = findSourcemap(bundle);
+              if (!map) return { bundle: path.relative(process.cwd(), bundle), sourcemap: null, topModules: [] };
+
+              // Best-effort: some repos may not produce maps; do not fail baseline.
+              let out = '';
+              try {
+                out = execSync(`pnpm dlx source-map-explorer "${bundle}" --json`, {
+                  stdio: ['ignore', 'pipe', 'pipe'],
+                  maxBuffer: 50 * 1024 * 1024
+                }).toString('utf8');
+              } catch {
+                return { bundle: path.relative(process.cwd(), bundle), sourcemap: path.relative(process.cwd(), map), topModules: [] };
+              }
+
+              let parsed;
+              try { parsed = JSON.parse(out); } catch { return { bundle: path.relative(process.cwd(), bundle), sourcemap: path.relative(process.cwd(), map), topModules: [] }; }
+
+              let entries = [];
+              const addEntries = (obj) => {
+                if (obj?.bundles?.[0]?.files?.length) {
+                  for (const f of obj.bundles[0].files) {
+                    const name = f.file || f.name || f.module;
+                    const size = f.size ?? f.bytes ?? f.weight;
+                    if (name && Number.isFinite(size)) entries.push({ module: String(name), bytes: Number(size) });
+                  }
+                  return true;
+                }
+                if (obj?.files?.length) {
+                  for (const f of obj.files) {
+                    const name = f.file || f.name || f.module;
+                    const size = f.size ?? f.bytes ?? f.weight;
+                    if (name && Number.isFinite(size)) entries.push({ module: String(name), bytes: Number(size) });
+                  }
+                  return true;
+                }
+                if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+                  const kv = Object.entries(obj)
+                    .filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
+                    .map(([k, v]) => ({ module: String(k), bytes: Number(v) }));
+                  if (kv.length) { entries.push(...kv); return true; }
+                }
+                return false;
+              };
+              if (Array.isArray(parsed)) parsed.forEach(addEntries);
+              else addEntries(parsed);
+
+              entries = entries
+                .filter(e => e.bytes > 0)
+                .sort((a,b) => b.bytes - a.bytes)
+                .slice(0, 25);
+
+              return { bundle: path.relative(process.cwd(), bundle), sourcemap: path.relative(process.cwd(), map), topModules: entries };
+            } catch {
+              return { bundle: null, sourcemap: null, topModules: [] };
+            }
+          }
+
+          const files = walk(OUT_DIR);
+          const s = summarize(OUT_DIR, files);
+
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const depCount = Object.keys(pkg.dependencies || {}).length;
+
+          const moduleAnalysis = analyzeModules(OUT_DIR);
+
+          const report = {
+            mode: 'baseline',
+            generatedAt: new Date().toISOString(),
+            platform: 'android',
+            exportDir: OUT_DIR,
+
+            exportBytes: s.total,
+            jsBytes: s.js,
+            imageBytes: s.images,
+            fontBytes: s.fonts,
+            otherBytes: s.other,
+
+            topDirs: s.topDirs,
+
+            depCount,
+            moduleAnalysis,
+
+            sha: process.env.GITHUB_SHA,
+            ref: process.env.GITHUB_REF,
+          };
+
+          fs.writeFileSync('perf-report.json', JSON.stringify(report, null, 2));
+          console.log(`[perf] baseline total=${(s.total/(1024*1024)).toFixed(2)}MB js=${(s.js/(1024*1024)).toFixed(2)}MB modules=${moduleAnalysis.topModules.length}`);
+          NODE
+
+      - name: Upload baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-baseline-main
+          path: perf-report.json
+          retention-days: 30
+
+  perf_pr:
+    name: PR performance (comment)
+    if: github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true' && needs.wait-for-branch-guard.result == 'success'
+    needs: [wait-for-branch-guard, changes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Export (Android only)
+        run: pnpm expo export --platform android --output-dir dist-perf
+
+      - name: Generate PR report (A only, no hashes)
+        env:
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
         run: |
-          echo "Heavy dependencies:" > heavy-deps.txt
-          du -sh node_modules/* | sort -rh | head -10 >> heavy-deps.txt
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
 
-      - name: Calculate startup metrics
-        id: startup
-        run: |
-          START_TIME=$(node -e "console.time('startup'); try { require('./App.tsx'); } catch(e) {} console.timeEnd('startup')" 2>&1 | grep startup || echo "startup: 0ms")
-          echo "startup_time=$START_TIME" >> $GITHUB_OUTPUT
+          const OUT_DIR = 'dist-perf';
 
-      - name: Comment performance metrics
-        if: github.event_name == 'pull_request' 
+          function walk(dir) {
+            let files = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const p = path.join(dir, entry.name);
+              if (entry.isDirectory()) files = files.concat(walk(p));
+              else files.push({ file: p, size: fs.statSync(p).size });
+            }
+            return files;
+          }
+
+          function summarize(outDir, files) {
+            const sum = { total: 0, js: 0, maps: 0, images: 0, fonts: 0, other: 0, byTopDir: {} };
+            for (const f of files) {
+              const rel = f.file.replace(outDir + path.sep, '').split(path.sep).join('/');
+              const ext = (rel.split('.').pop() || '').toLowerCase();
+              const topDir = rel.split('/')[0] || '(root)';
+
+              sum.total += f.size;
+              sum.byTopDir[topDir] = (sum.byTopDir[topDir] || 0) + f.size;
+
+              if (ext === 'js') sum.js += f.size;
+              else if (ext === 'map') sum.maps += f.size;
+              else if (['png','jpg','jpeg','webp','gif','svg'].includes(ext)) sum.images += f.size;
+              else if (['ttf','otf','woff','woff2'].includes(ext)) sum.fonts += f.size;
+              else sum.other += f.size;
+            }
+
+            const topDirs = Object.entries(sum.byTopDir)
+              .sort((a,b) => b[1] - a[1])
+              .slice(0, 8)
+              .map(([dir, bytes]) => ({ dir, bytes }));
+
+            return { ...sum, topDirs };
+          }
+
+          const files = walk(OUT_DIR);
+          const s = summarize(OUT_DIR, files);
+
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const depCount = Object.keys(pkg.dependencies || {}).length;
+
+          const report = {
+            mode: 'pr',
+            generatedAt: new Date().toISOString(),
+            platform: 'android',
+            exportDir: OUT_DIR,
+
+            exportBytes: s.total,
+            jsBytes: s.js,
+            imageBytes: s.images,
+            fontBytes: s.fonts,
+            otherBytes: s.other,
+
+            topDirs: s.topDirs,
+
+            depCount,
+
+            prNumber: process.env.GITHUB_PR_NUMBER,
+            baseBranch: process.env.GITHUB_BASE_REF,
+            sha: process.env.GITHUB_SHA,
+            ref: process.env.GITHUB_REF,
+
+            moduleAnalysis: { bundle: null, sourcemap: null, topModules: [] } // filled only if deep-gated
+          };
+
+          fs.writeFileSync('perf-report.json', JSON.stringify(report, null, 2));
+          console.log(`[perf] pr total=${(s.total/(1024*1024)).toFixed(2)}MB js=${(s.js/(1024*1024)).toFixed(2)}MB`);
+          NODE
+
+      - name: Download baseline
+        uses: dawidd6/action-download-artifact@v6
+        continue-on-error: true
+        with:
+          workflow: performance.yml
+          branch: main
+          name: perf-baseline-main
+          path: baseline
+
+      - name: Decide whether to run deep analysis (label perf-deep OR size delta threshold)
+        id: gate
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const prNumber = parseInt('${{ github.event.pull_request.number }}');
-            const heavyDeps = fs.readFileSync('heavy-deps.txt', 'utf8');
 
-            const comment = `## 📊 Performance Metrics
+            const labels = (context.payload.pull_request.labels || []).map(l => l.name);
+            const hasLabel = labels.includes('perf-deep');
 
-            ### 📦 Dependency Analysis
-            - **Total dependencies**: ${{ steps.deps.outputs.total }}
-            - **Direct dependencies**: ${{ steps.deps.outputs.direct }}
-            - **Dev dependencies**: ${{ steps.deps.outputs.dev }}
+            const WARN_DELTA_MB = 0.5;
+            const WARN_DELTA_PCT = 5;
 
-            ### ⚡ Startup Metrics
-            - **Estimated startup time**: ${{ steps.startup.outputs.startup_time }}
+            const pr = JSON.parse(fs.readFileSync('perf-report.json', 'utf8'));
+            const basePath = 'baseline/perf-report.json';
 
-            ### 🏋️ Heaviest Dependencies
-            \`\`\`
-            ${heavyDeps}
-            \`\`\`
+            let shouldDeep = false;
+            let reason = '';
 
-            ### 💡 Recommendations
-            ${parseInt('${{ steps.deps.outputs.total }}') > 500 ? '⚠️ High dependency count. Consider auditing unused packages.' : '✅ Dependency count looks healthy.'}
+            if (hasLabel) {
+              shouldDeep = true;
+              reason = 'label perf-deep';
+            } else if (fs.existsSync(basePath)) {
+              const base = JSON.parse(fs.readFileSync(basePath, 'utf8'));
+              const delta = pr.exportBytes - (base.exportBytes ?? 0);
+              const pct = (base.exportBytes ?? 0) > 0 ? (delta / base.exportBytes) * 100 : 0;
 
-            ---
-            *Performance monitoring by GitHub Actions*`;
+              if (delta >= WARN_DELTA_MB * 1024 * 1024) {
+                shouldDeep = true;
+                reason = `delta ≥ ${WARN_DELTA_MB}MB`;
+              } else if (pct >= WARN_DELTA_PCT) {
+                shouldDeep = true;
+                reason = `delta ≥ ${WARN_DELTA_PCT}%`;
+              } else {
+                reason = 'below thresholds and no perf-deep label';
+              }
+            } else {
+              reason = 'no baseline and no perf-deep label';
+            }
+
+            core.setOutput('should_deep', shouldDeep ? 'true' : 'false');
+            core.setOutput('reason', reason);
+
+      - name: Deep module analysis (B) via sourcemaps (gated)
+        if: steps.gate.outputs.should_deep == 'true'
+        continue-on-error: true
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const { execSync } = require('child_process');
+
+          const OUT_DIR = 'dist-perf';
+
+          function walk(dir) {
+            let files = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const p = path.join(dir, entry.name);
+              if (entry.isDirectory()) files = files.concat(walk(p));
+              else files.push({ file: p, size: fs.statSync(p).size });
+            }
+            return files;
+          }
+
+          function findLargestJsBundle(outDir) {
+            const files = walk(outDir).filter(f => f.file.endsWith('.js'));
+            files.sort((a,b) => b.size - a.size);
+            return files[0]?.file || null;
+          }
+
+          function findSourcemap(bundlePath) {
+            const direct = `${bundlePath}.map`;
+            if (fs.existsSync(direct)) return direct;
+
+            try {
+              const tail = fs.readFileSync(bundlePath, 'utf8').split('\n').slice(-10).join('\n');
+              const m = tail.match(/sourceMappingURL=(.+)\s*$/m);
+              if (!m) return null;
+              const sm = m[1].trim();
+              const candidate = path.join(path.dirname(bundlePath), sm);
+              if (fs.existsSync(candidate)) return candidate;
+            } catch {}
+            return null;
+          }
+
+          function parseSME(jsonText) {
+            let parsed;
+            try { parsed = JSON.parse(jsonText); } catch { return []; }
+
+            let entries = [];
+            const addEntries = (obj) => {
+              if (obj?.bundles?.[0]?.files?.length) {
+                for (const f of obj.bundles[0].files) {
+                  const name = f.file || f.name || f.module;
+                  const size = f.size ?? f.bytes ?? f.weight;
+                  if (name && Number.isFinite(size)) entries.push({ module: String(name), bytes: Number(size) });
+                }
+                return true;
+              }
+              if (obj?.files?.length) {
+                for (const f of obj.files) {
+                  const name = f.file || f.name || f.module;
+                  const size = f.size ?? f.bytes ?? f.weight;
+                  if (name && Number.isFinite(size)) entries.push({ module: String(name), bytes: Number(size) });
+                }
+                return true;
+              }
+              if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+                const kv = Object.entries(obj)
+                  .filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
+                  .map(([k, v]) => ({ module: String(k), bytes: Number(v) }));
+                if (kv.length) { entries.push(...kv); return true; }
+              }
+              return false;
+            };
+            if (Array.isArray(parsed)) parsed.forEach(addEntries);
+            else addEntries(parsed);
+
+            return entries
+              .filter(e => e.bytes > 0)
+              .sort((a,b) => b.bytes - a.bytes)
+              .slice(0, 25);
+          }
+
+          const bundle = findLargestJsBundle(OUT_DIR);
+          if (!bundle) {
+            console.log('[perf] deep: no JS bundle found');
+            process.exit(0);
+          }
+
+          const map = findSourcemap(bundle);
+          if (!map) {
+            console.log('[perf] deep: no sourcemap found; skipping');
+            process.exit(0);
+          }
+
+          let out = '';
+          try {
+            out = execSync(`pnpm dlx source-map-explorer "${bundle}" --json`, {
+              stdio: ['ignore', 'pipe', 'pipe'],
+              maxBuffer: 50 * 1024 * 1024
+            }).toString('utf8');
+          } catch (e) {
+            console.log('[perf] deep: source-map-explorer failed');
+            process.exit(0);
+          }
+
+          const topModules = parseSME(out);
+
+          const pr = JSON.parse(fs.readFileSync('perf-report.json', 'utf8'));
+          pr.moduleAnalysis = {
+            bundle: path.relative(process.cwd(), bundle),
+            sourcemap: path.relative(process.cwd(), map),
+            topModules
+          };
+          fs.writeFileSync('perf-report.json', JSON.stringify(pr, null, 2));
+
+          console.log(`[perf] deep: modules=${topModules.length}`);
+          NODE
+
+      - name: Build PR comment (A always, B gated)
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          DEEP_SHOULD: ${{ steps.gate.outputs.should_deep }}
+          DEEP_REASON: ${{ steps.gate.outputs.reason }}
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+
+          const pr = JSON.parse(fs.readFileSync('perf-report.json', 'utf8'));
+          const basePath = 'baseline/perf-report.json';
+          const base = fs.existsSync(basePath) ? JSON.parse(fs.readFileSync(basePath, 'utf8')) : null;
+
+          const WARN_ABS_MB = 10;
+          const WARN_DELTA_MB = 0.5;
+          const WARN_DELTA_PCT = 5;
+
+          const mb = (bytes) => bytes / (1024 * 1024);
+          const fmtMB = (bytes) => `${mb(bytes).toFixed(2)} MB`;
+
+          const haveBase = typeof base?.exportBytes === 'number';
+
+          function fmtDelta(deltaBytes, baseBytes) {
+            const sign = deltaBytes >= 0 ? '+' : '';
+            const pct = baseBytes > 0 ? (deltaBytes / baseBytes) * 100 : 0;
+            return `${sign}${fmtMB(deltaBytes)} (${sign}${pct.toFixed(1)}%)`;
+          }
+
+          const metrics = [
+            ['Total export', pr.exportBytes, base?.exportBytes],
+            ['JS bundles', pr.jsBytes, base?.jsBytes],
+            ['Images', pr.imageBytes, base?.imageBytes],
+            ['Fonts', pr.fontBytes, base?.fontBytes],
+            ['Other', pr.otherBytes, base?.otherBytes],
+          ];
+
+          let warn = false;
+          const warnings = [];
+
+          if (mb(pr.exportBytes) >= WARN_ABS_MB) {
+            warn = true;
+            warnings.push(`Total export size is ≥ ${WARN_ABS_MB} MB`);
+          }
+
+          if (haveBase) {
+            const delta = pr.exportBytes - base.exportBytes;
+            const pct = base.exportBytes > 0 ? (delta / base.exportBytes) * 100 : 0;
+            if (delta >= WARN_DELTA_MB * 1024 * 1024) {
+              warn = true;
+              warnings.push(`Total size increased by ≥ ${WARN_DELTA_MB} MB vs baseline`);
+            }
+            if (pct >= WARN_DELTA_PCT) {
+              warn = true;
+              warnings.push(`Total size increased by ≥ ${WARN_DELTA_PCT}% vs baseline`);
+            }
+          } else {
+            warnings.push('No baseline found yet (merge to main to establish baseline).');
+          }
+
+          const icon = warn ? '⚠️' : '✅';
+          const title = warn ? 'Performance review needed' : 'Performance looks OK';
+
+          const breakdownRows = metrics.map(([label, prBytes, baseBytes]) => {
+            if (!haveBase || typeof baseBytes !== 'number') return `| ${label} | **${fmtMB(prBytes)}** | — |`;
+            return `| ${label} | **${fmtMB(prBytes)}** | ${fmtDelta(prBytes - baseBytes, baseBytes)} |`;
+          }).join('\n');
+
+          const depDeltaText = (() => {
+            if (!haveBase) return `${pr.depCount}`;
+            const d = pr.depCount - (base.depCount ?? 0);
+            const sign = d >= 0 ? '+' : '';
+            return `${pr.depCount} (${sign}${d})`;
+          })();
+
+          const topDirs = (pr.topDirs || [])
+            .map(d => `- \`${d.dir}\`: ${fmtMB(d.bytes)}`)
+            .join('\n') || '_No directory summary available._';
+
+          // B section (gated)
+          const deepShould = process.env.DEEP_SHOULD === 'true';
+          const deepReason = process.env.DEEP_REASON || 'n/a';
+
+          const prMods = pr.moduleAnalysis?.topModules || [];
+          const baseMods = base?.moduleAnalysis?.topModules || [];
+          const baseMap = new Map(baseMods.map(m => [m.module, m.bytes]));
+
+          const modLines = prMods.slice(0, 15).map(m => {
+            const b = baseMap.get(m.module);
+            if (typeof b === 'number') {
+              const delta = m.bytes - b;
+              const sign = delta >= 0 ? '+' : '';
+              return `${(m.bytes/1024).toFixed(0)} KB (${sign}${(delta/1024).toFixed(0)} KB)\t${m.module}`;
+            }
+            return `${(m.bytes/1024).toFixed(0)} KB\t${m.module}`;
+          }).join('\n');
+
+          let moduleBlock = '';
+          if (!deepShould) {
+            moduleBlock = `
+          <details>
+          <summary>Root-cause (top modules)</summary>
+
+          _Skipped (gate): ${deepReason}._  
+          _Add label \`perf-deep\` to force this analysis._
+          </details>
+            `.replace(/^ {10}/gm, '').trim();
+          } else if (prMods.length) {
+            moduleBlock = `
+          <details>
+          <summary>Root-cause (top modules by bundle contribution)</summary>
+
+          _Bundle:_ \`${pr.moduleAnalysis.bundle || 'unknown'}\`  
+          ${pr.moduleAnalysis.sourcemap ? `_Sourcemap:_ \`${pr.moduleAnalysis.sourcemap}\`` : '_Sourcemap:_ not found'}
+
+          \`\`\`text
+          ${modLines}
+          \`\`\`
+
+          _If deltas are shown in parentheses, they compare to baseline’s module list (when available)._
+          </details>
+            `.replace(/^ {10}/gm, '').trim();
+          } else {
+            moduleBlock = `
+          <details>
+          <summary>Root-cause (top modules)</summary>
+
+          _Attempted but no module data was produced (missing sourcemaps or analyzer output)._
+          </details>
+            `.replace(/^ {10}/gm, '').trim();
+          }
+
+          const warningBlock = warnings.length
+            ? `### ⚠️ Warnings\n${warnings.map(w => `- ${w}`).join('\n')}\n`
+            : `### ✅ No warnings\n`;
+
+          const body = `
+          ## ${icon} Performance (export size) — ${title}
+
+          | Metric | PR | Δ vs baseline |
+          | :--- | ---: | ---: |
+          ${breakdownRows}
+
+          | Other | Value |
+          | :--- | :--- |
+          | **Target branch** | \`${process.env.GITHUB_BASE_REF || pr.baseBranch || 'main'}\` |
+          | **Dependencies** | ${depDeltaText} |
+
+          ${warningBlock}
+
+          <details>
+          <summary>Where the bytes live (top directories)</summary>
+
+          ${topDirs}
+          </details>
+
+          ${moduleBlock}
+
+          ---
+          _Info-only. This does not block merges._  
+          _Calculated via Expo Export (Android)._
+          `.replace(/^ {10}/gm, '').trim();
+
+          fs.writeFileSync('perf-comment.md', body);
+          NODE
+
+      - name: Comment on PR (create or update)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const pr = context.payload.pull_request;
+            if (!pr) return;
+
+            const body = fs.readFileSync('perf-comment.md', 'utf8');
+            const issue_number = pr.number;
+            const { owner, repo } = context.repo;
 
             const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
+              owner, repo, issue_number,
+              per_page: 100,
             });
 
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && 
-              comment.body.includes('Performance Metrics')
-            );
+            const marker = 'Performance (export size)';
+            const existing = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
 
-            if (botComment) {
+            if (existing) {
               await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: comment
+                owner, repo, comment_id: existing.id, body,
               });
             } else {
               await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: comment
+                owner, repo, issue_number, body,
               });
             }
 
-  react-native-profiling:
-    name: React Native Profiling
-    # Only run on successful guard check OR non-PR events (push, schedule)
-    if: github.event_name != 'pull_request' || needs.guard.result == 'success'
-    needs: guard
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v3
-
-      - name: Get pnpm store directory
-        id: pnpm-cache
-        shell: bash
-        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run React DevTools Profiler
-        run: |
-          # This would require a custom profiling script
-          # Example: measure render times, component updates, etc.
-          node scripts/profile-performance.js || echo "Profiling script not found"
-
-      - name: Check for performance anti-patterns
-        run: |
-          # Check for common performance issues
-          echo "Checking for performance anti-patterns..."
-
-          # Find large inline functions
-          grep -r "style={{" src/ | wc -l > inline-styles-count.txt || echo "0" > inline-styles-count.txt
-
-          # Find console.logs (should be removed in production)
-          grep -r "console\." src/ | grep -v "node_modules" | wc -l > console-count.txt || echo "0" > console-count.txt
-
-          # Find useMemo/useCallback usage
-          grep -r "useMemo\|useCallback" src/ | wc -l > optimization-hooks-count.txt || echo "0" > optimization-hooks-count.txt
-
-      - name: Upload profiling results
+      - name: Upload perf artifacts (optional)
         uses: actions/upload-artifact@v4
         with:
-          name: performance-profiling-${{ github.sha }}
+          name: perf-${{ github.run_id }}
           path: |
-            *-count.txt
-            heavy-deps.txt
+            perf-report.json
+            perf-comment.md
+          retention-days: 30
