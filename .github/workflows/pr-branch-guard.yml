@@ -38,7 +38,7 @@ jobs:
             let allowed = true;
             let explanation = '';
 
-            if (base === 'main') {
+            if (base === 'production') {
               // main: only from staging, hotfix/*, release/*
               allowed =
                 head === 'staging' ||
@@ -47,7 +47,7 @@ jobs:
                 head.startsWith('release/');
 
               explanation = [
-                'Allowed PR sources into `main`:',
+                'Allowed PR sources into `production`:',
                 '- `staging`',
                 '- `release`',
                 '- `hotfix/*`',
@@ -63,7 +63,7 @@ jobs:
                 '- `hotfix/*` (Direct Hotfix Propagation)',
               ].join('\n');
 
-            } else if (base === 'develop') {
+            } else if (base === 'main') {
               // develop: feature/*, bugfix/*, ... OR hotfix/*
               const allowedPrefixes = [
                 'feature/',
@@ -79,7 +79,7 @@ jobs:
               allowed = startsWithOneOf(head, allowedPrefixes);
 
               explanation = [
-                'Allowed PR sources into `develop`:',
+                'Allowed PR sources into `main`:',
                 '- `feature/*`, `bugfix/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*` (New Work)',
                 '- `hotfix/*` (Standard Development and Hotfix Propagation)',
                 '- `release/*` (Cross-Propagation)',
