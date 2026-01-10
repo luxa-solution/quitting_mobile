@@ -1,9 +1,10 @@
-import { Href, router } from 'expo-router';
+import { Href, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { Alert, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StyleSheet } from 'react-native-unistyles';
 
+import { registerMutation } from '../api';
 import {
   Header,
   PasswordRules,
@@ -14,23 +15,39 @@ import {
 } from '../components';
 import { evaluatePassword } from '../utils';
 
-type Props = {
-  onSubmit?: (payload: { email: string; password: string }) => void;
-};
-
-export function SignupScreen({ onSubmit }: Props) {
+export function SignupScreen() {
   const { top, bottom } = useSafeAreaInsets();
+  const router = useRouter();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const rules = useMemo(() => evaluatePassword(password), [password]);
   const canSubmit =
-    email.trim().length > 0 && password.length > 0 && Object.values(rules).every(Boolean);
+    !isSubmitting &&
+    email.trim().length > 0 &&
+    password.length > 0 &&
+    Object.values(rules).every(Boolean);
 
-  const handleCreateAccount = () => {
+  const handleCreateAccount = async () => {
     if (!canSubmit) return;
-    onSubmit?.({ email: email.trim(), password });
-    router.replace('/tabs' as Href);
+
+    try {
+      setIsSubmitting(true);
+
+      await registerMutation({
+        email: email.trim(),
+        password,
+      });
+
+      router.replace('/new-user-onboarding' as Href);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Signup failed.';
+      Alert.alert('Signup failed', message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
