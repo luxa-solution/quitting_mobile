@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, Image } from 'react-native';
 import { StyleSheet } from 'react-native-unistyles';
