@@ -16,6 +16,8 @@ function UserOnboardingLayout() {
         headerShown: false,
       }}>
       <Stack.Screen name="index" />
+      <Stack.Screen name="steps" />
+      <Stack.Screen name="protection" />
     </Stack>
   );
 }
