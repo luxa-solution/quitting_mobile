@@ -4,7 +4,7 @@ import { StyleSheet } from 'react-native-unistyles';
 import type { InfoStep } from '@/features/user-onboarding/types';
 import { userOnboardingImages } from '@/features/user-onboarding/utils';
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const { height: screenHeight } = Dimensions.get('window');
 
 type Props = {
   step: InfoStep;
