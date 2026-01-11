@@ -1,4 +1,3 @@
-import { Href, router } from 'expo-router';
 import {
   ProtectionActivated,
   ProtectionGrant,

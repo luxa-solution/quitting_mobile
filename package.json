@@ -80,8 +80,5 @@
     "**/*.{json,md}": [
       "pnpm prettier --write"
     ]
-  },
-  "pnpm": {
-    "node-linker": "hoisted"
   }
 }
