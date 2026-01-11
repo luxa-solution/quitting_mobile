@@ -7,7 +7,11 @@ type Props = { title: string; onBack: () => void };
 export function Header({ title, onBack }: Props) {
   return (
     <View style={styles.container}>
-      <Pressable testID="auth-back" accessibilityRole="button" onPress={onBack} style={styles.back}>
+      <Pressable
+        testID="auth-header-back"
+        accessibilityRole="button"
+        onPress={onBack}
+        style={styles.back}>
         <Ionicons name="chevron-back" size={20} color="#111111" />
       </Pressable>
       <View style={styles.textContainer}>
@@ -18,7 +22,7 @@ export function Header({ title, onBack }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -27,8 +31,8 @@ const styles = StyleSheet.create({
   back: {
     width: 36,
     height: 36,
-    borderRadius: 100,
-    backgroundColor: '#FFFFFF',
+    borderRadius: theme.radii.round,
+    backgroundColor: theme.colors.surface.base,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -44,6 +48,6 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#000000',
+    color: theme.colors.content.primary,
   },
-});
+}));

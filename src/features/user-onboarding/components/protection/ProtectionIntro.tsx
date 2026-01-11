@@ -36,16 +36,24 @@ export function ProtectionIntro() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   footer: {},
   secondary: {
     marginTop: 10,
     height: 52,
-    borderRadius: 26,
-    backgroundColor: '#ECECEC',
+    borderRadius: theme.radii.pill,
+    backgroundColor: theme.colors.button.secondaryBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  secondaryText: { fontSize: 14, fontWeight: '600', color: '#000000' },
-  footnote: { textAlign: 'center', fontSize: 12, color: '#808080' },
-});
+  secondaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.button.secondaryText,
+  },
+  footnote: {
+    textAlign: 'center',
+    fontSize: 12,
+    color: theme.colors.content.secondary,
+  },
+}));

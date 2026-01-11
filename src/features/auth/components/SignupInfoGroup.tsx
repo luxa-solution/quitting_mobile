@@ -38,12 +38,13 @@ export function SignupInfoGroup({ onPressPrivacy, onPressTerms, linkStyle }: Pro
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   infoGroup: {
     gap: 10,
   },
   link: {
     fontWeight: '600',
     textDecorationLine: 'underline',
+    color: theme.colors.content.primary,
   },
-});
+}));

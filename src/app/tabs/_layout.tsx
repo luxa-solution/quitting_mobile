@@ -8,18 +8,18 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerStyle: {
-          backgroundColor: theme.colors.background,
+          backgroundColor: theme.colors.background.screen,
         },
         headerTitleStyle: {
-          color: theme.colors.typography,
+          color: theme.colors.content.primary,
         },
-        tabBarActiveTintColor: theme.colors.astral,
+        tabBarActiveTintColor: theme.colors.brand.primary,
         tabBarStyle: {
-          backgroundColor: theme.colors.background,
+          backgroundColor: theme.colors.background.screen,
         },
+        headerShown: false,
       }}>
       <Tabs.Screen name="index" />
-      <Tabs.Screen name="two" />
     </Tabs>
   );
 }

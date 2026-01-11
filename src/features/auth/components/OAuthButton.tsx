@@ -26,11 +26,11 @@ export function OAuthButton({ variant, text, onPress, testID, buttonStyle, textS
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   button: {
     width: '100%',
-    borderRadius: 26,
-    backgroundColor: '#F2F2F2',
+    borderRadius: theme.radii.pill,
+    backgroundColor: theme.colors.surface.muted,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
@@ -41,10 +41,10 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 14,
     fontWeight: '400',
-    color: '#17052F',
+    color: theme.colors.content.primary,
   },
   icon: {
     width: 16,
     height: 16,
   },
-});
+}));

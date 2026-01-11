@@ -28,7 +28,7 @@ export function TitleBlock({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   wrap: {
     gap: 8,
     width: '100%',
@@ -39,12 +39,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: '500',
-    color: '#000000',
+    color: theme.colors.content.primary,
     lineHeight: 34,
   },
   subtitle: {
     fontSize: 16,
-    color: '#808080',
+    color: theme.colors.content.secondary,
     lineHeight: 22,
   },
-});
+}));

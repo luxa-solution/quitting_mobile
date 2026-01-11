@@ -1,6 +1,6 @@
 import { Href, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StyleSheet } from 'react-native-unistyles';
 
@@ -33,21 +33,12 @@ export function SignupScreen() {
   const handleCreateAccount = async () => {
     if (!canSubmit) return;
 
-    try {
-      setIsSubmitting(true);
+    setIsSubmitting(true);
 
-      // await registerMutation({
-      //   email: email.trim(),
-      //   password,
-      // });
+    // TEMP: no registerMutation yet
+    router.replace('/new-user-onboarding' as Href);
 
-      router.replace('/new-user-onboarding' as Href);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'Signup failed.';
-      Alert.alert('Signup failed', message);
-    } finally {
-      setIsSubmitting(false);
-    }
+    setIsSubmitting(false);
   };
 
   const handleGoogleOAuth = () => router.replace('/new-user-onboarding' as Href);
@@ -84,10 +75,10 @@ export function SignupScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   safe: {
     flex: 1,
-    backgroundColor: '#F7F8FB',
+    backgroundColor: theme.colors.background.screen_auth,
   },
   container: {
     flex: 1,
@@ -98,4 +89,4 @@ const styles = StyleSheet.create({
   form: {
     gap: 30,
   },
-});
+}));

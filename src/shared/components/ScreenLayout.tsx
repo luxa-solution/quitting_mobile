@@ -10,6 +10,7 @@ type Props = {
   topOffset?: number;
   style?: StyleProp<ViewStyle>;
   paddingHorizontal?: number;
+  testID?: string;
 };
 
 export function ScreenLayout({
@@ -19,11 +20,13 @@ export function ScreenLayout({
   topOffset = 0,
   paddingHorizontal = 20,
   style,
+  testID,
 }: Props) {
   const { top, bottom } = useSafeAreaInsets();
 
   return (
     <View
+      testID={testID ?? 'screen-layout'}
       style={[
         styles.base,
         { paddingHorizontal },
@@ -36,9 +39,9 @@ export function ScreenLayout({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   base: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.colors.background.screen,
   },
-});
+}));

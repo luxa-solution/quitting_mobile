@@ -10,7 +10,7 @@ export function Header() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -24,5 +24,6 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 20,
     fontWeight: '400',
+    color: theme.colors.content.primary,
   },
-});
+}));

@@ -17,6 +17,7 @@ export function ProgressHeader({ step, total, onBack, onSkip }: Props) {
       <View style={styles.counterContainer}>
         <Text style={styles.stepText}>{`${step}/${total}`}</Text>
       </View>
+
       <View style={styles.container}>
         <Pressable
           testID="uob-back"
@@ -40,7 +41,7 @@ export function ProgressHeader({ step, total, onBack, onSkip }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   wrapper: {
     alignItems: 'center',
   },
@@ -56,8 +57,8 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 36,
     height: 36,
-    borderRadius: 999,
-    backgroundColor: '#EFEFEF',
+    borderRadius: theme.radii.round,
+    backgroundColor: theme.colors.surface.soft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -70,25 +71,25 @@ const styles = StyleSheet.create({
   },
   stepText: {
     fontSize: 10,
-    color: '#9A9A9A',
+    color: theme.colors.content.muted,
     marginBottom: 6,
   },
   track: {
     width: '70%',
     height: 6,
-    borderRadius: 999,
-    backgroundColor: '#EAEAEA',
+    borderRadius: theme.radii.round,
+    backgroundColor: theme.colors.border.subtle,
     overflow: 'hidden',
   },
   bar: {
     height: '100%',
-    borderRadius: 999,
-    backgroundColor: '#000000',
+    borderRadius: theme.radii.round,
+    backgroundColor: theme.colors.content.primary,
   },
   skip: {
     fontSize: 12,
     fontWeight: '500',
     lineHeight: 18,
-    color: '#111111',
+    color: theme.colors.content.primary,
   },
-});
+}));

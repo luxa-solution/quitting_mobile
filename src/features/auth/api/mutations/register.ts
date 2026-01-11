@@ -1,5 +1,5 @@
+import { apiFetch } from '@/core/api';
 import type { RegisterDto, RegisterResponseDto } from '@/features/auth/types';
-import { apiFetch } from '../client';
 import { AUTH_ENDPOINTS } from '../endpoints';
 
 export function registerMutation(payload: RegisterDto) {

@@ -30,7 +30,7 @@ export function OneSlide({ item, index, total, onNext }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   container: {
     width: window_width,
     paddingHorizontal: 24,
@@ -50,15 +50,15 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
     lineHeight: 39,
-    color: '#000000',
+    color: theme.colors.content.primary,
   },
   description: {
     numberOfLines: 2,
     fontSize: 16,
     fontWeight: '400',
-    color: '#808080',
+    color: theme.colors.content.secondary,
     textAlign: 'center',
     lineHeight: 22,
     minHeight: 44,
   },
-});
+}));

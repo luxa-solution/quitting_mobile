@@ -8,10 +8,10 @@ function UserOnboardingLayout() {
     <Stack
       screenOptions={{
         headerStyle: {
-          backgroundColor: theme.colors.background,
+          backgroundColor: theme.colors.background.screen,
         },
         headerTitleStyle: {
-          color: theme.colors.typography,
+          color: theme.colors.content.primary,
         },
         headerShown: false,
       }}>

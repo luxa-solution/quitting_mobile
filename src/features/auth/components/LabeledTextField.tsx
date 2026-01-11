@@ -46,13 +46,13 @@ export function LabeledTextField({
 
         {secure && (
           <Pressable
-            testID={`${testID}-toggle`}
+            testID={testID ? `${testID}-toggle` : undefined}
             accessibilityRole="button"
             onPress={() => setIsSecure((s) => !s)}
             style={styles.iconBtn}
             hitSlop={10}>
             <Image
-              testID={`${testID}-eye`}
+              testID={testID ? `${testID}-eye` : undefined}
               source={isSecure ? authImages.eyeOpen : authImages.eyeClosed}
               style={styles.eyeIcon}
               resizeMode="contain"
@@ -64,31 +64,31 @@ export function LabeledTextField({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   wrapper: {
     gap: 10,
   },
   label: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#1A1A1A',
+    color: theme.colors.content.primary,
   },
   inputWrap: {
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
+    borderRadius: theme.radii.md,
+    backgroundColor: theme.colors.surface.base,
     paddingHorizontal: 12,
     justifyContent: 'center',
     position: 'relative',
   },
   inputWrapFocus: {
-    boxShadow: '0px 1px 2px 2px rgba(158, 121, 46, 0.3)',
+    boxShadow: theme.shadows.focus,
   },
   inputWrapBlur: {
-    boxShadow: '0px 1px 0px 1px rgba(0, 0, 0, 0.07)',
+    boxShadow: theme.shadows.soft,
   },
   input: {
     fontSize: 16,
-    color: '#333333',
+    color: theme.colors.content.primary,
     fontWeight: '500',
   },
   inputWithIcon: {
@@ -106,4 +106,4 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
   },
-});
+}));
