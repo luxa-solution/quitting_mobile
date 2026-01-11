@@ -34,10 +34,10 @@ export function WelcomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.colors.background.screen,
   },
   bgImage: {
     position: 'absolute',
@@ -59,4 +59,4 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
     zIndex: 2,
   },
-});
+}));

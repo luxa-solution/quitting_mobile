@@ -25,11 +25,11 @@ export function OptionCard({ label, selected, onPress, testID }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   card: {
     minHeight: 54,
-    backgroundColor: '#EDEDED',
-    borderRadius: 12,
+    backgroundColor: theme.colors.surface.soft,
+    borderRadius: theme.radii.lg,
     paddingHorizontal: 14,
     paddingVertical: 14,
     flexDirection: 'row',
@@ -41,28 +41,28 @@ const styles = StyleSheet.create({
   box: {
     width: 20,
     height: 20,
-    borderRadius: 6,
+    borderRadius: theme.radii.sm,
     borderWidth: 1,
-    borderColor: '#808080',
+    borderColor: theme.colors.content.secondary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   boxSelected: {
-    backgroundColor: '#000000',
-    borderColor: '#000000',
+    backgroundColor: theme.colors.content.primary,
+    borderColor: theme.colors.content.primary,
   },
   tick: {
-    color: '#FFFFFF',
+    color: theme.colors.content.onDark,
     fontSize: 12,
     marginTop: -1,
   },
   text: {
     fontSize: 16,
-    color: '#808080',
+    color: theme.colors.content.secondary,
     fontWeight: '400',
     lineHeight: 22,
   },
   textSelected: {
-    color: '#000000',
+    color: theme.colors.content.primary,
   },
-});
+}));

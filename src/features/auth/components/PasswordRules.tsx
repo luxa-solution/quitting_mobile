@@ -41,7 +41,7 @@ export function PasswordRules({ password }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   wrap: {
     marginTop: 10,
     flexDirection: 'row',
@@ -56,18 +56,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     borderWidth: 1,
-    borderColor: '#DBDBDB',
-    borderRadius: 999,
+    borderColor: theme.colors.border.default,
+    borderRadius: theme.radii.round,
   },
   chipOk: {
-    backgroundColor: '#9E792E',
+    backgroundColor: theme.colors.brand.primary,
+    borderColor: theme.colors.brand.primary,
   },
   chipText: {
     fontSize: 10,
-    color: '#8C8C8C',
+    color: theme.colors.content.muted,
     fontWeight: '500',
   },
   chipTextOk: {
-    color: '#FFFFFF',
+    color: theme.colors.content.onBrand,
   },
-});
+}));

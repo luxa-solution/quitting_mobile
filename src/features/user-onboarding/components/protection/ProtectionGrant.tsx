@@ -48,12 +48,36 @@ export function ProtectionGrant() {
   );
 }
 
-const styles = StyleSheet.create({
-  card: { width: '100%', backgroundColor: '#F5F5F5', borderRadius: 12, padding: 10, gap: 10 },
-  cardGroup: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
-  cardTitle: { fontSize: 18, fontWeight: '500', color: '#000000' },
-  cardTextGroup: { width: '70%' },
-  cardText: { fontSize: 16, color: '#808080' },
+const styles = StyleSheet.create((theme) => ({
+  card: {
+    width: '100%',
+    backgroundColor: theme.colors.surface.muted,
+    borderRadius: theme.radii.lg,
+    padding: 10,
+    gap: 14,
+  },
+  cardGroup: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: theme.colors.content.primary,
+  },
+  cardTextGroup: {
+    width: '70%',
+    gap: 8,
+  },
+  cardText: {
+    fontSize: 16,
+    color: theme.colors.content.secondary,
+  },
   footer: {},
-  footnote: { textAlign: 'center', fontSize: 12, color: '#808080' },
-});
+  footnote: {
+    textAlign: 'center',
+    fontSize: 12,
+    color: theme.colors.content.secondary,
+  },
+}));
