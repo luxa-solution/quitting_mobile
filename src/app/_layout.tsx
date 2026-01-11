@@ -35,12 +35,12 @@ export default function RootLayout() {
         initialRouteName="tabs"
         screenOptions={{
           headerStyle: {
-            backgroundColor: theme.colors.background,
+            backgroundColor: theme.colors.background.screen,
           },
           headerTitleStyle: {
-            color: theme.colors.typography,
+            color: theme.colors.content.primary,
           },
-          headerTintColor: theme.colors.typography,
+          headerTintColor: theme.colors.content.primary,
           headerShown: false,
         }}>
         <Stack.Screen name="tabs" />

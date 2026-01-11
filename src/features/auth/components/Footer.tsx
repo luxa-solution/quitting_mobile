@@ -20,7 +20,7 @@ export function Footer({ onPressSignIn }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   bottomRow: {
     marginTop: 22,
     flexDirection: 'row',
@@ -28,11 +28,11 @@ const styles = StyleSheet.create({
   },
   bottomText: {
     fontSize: 11,
-    color: '#8A8A8A',
+    color: theme.colors.content.muted,
   },
   link: {
     fontWeight: '600',
     textDecorationLine: 'underline',
-    color: '#9E792E',
+    color: theme.colors.brand.primary,
   },
-});
+}));

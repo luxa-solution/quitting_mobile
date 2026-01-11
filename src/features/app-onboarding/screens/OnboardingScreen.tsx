@@ -56,10 +56,10 @@ export function OnboardingScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: theme.colors.background.screen,
     justifyContent: 'space-evenly',
   },
-});
+}));

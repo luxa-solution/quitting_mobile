@@ -5,19 +5,26 @@ import { authImages } from '../utils';
 type Props = {
   variant?: 'shield' | 'flash';
   children: React.ReactNode;
+  testID?: string;
 };
 
-export function InfoRow({ variant = 'shield', children }: Props) {
+export function InfoRow({ variant = 'shield', children, testID }: Props) {
   const icon = variant === 'shield' ? authImages.shield : authImages.flash;
+
   return (
     <View style={styles.row}>
-      <Image source={icon} style={styles.icon} resizeMode="contain" />
+      <Image
+        testID={testID ? `${testID}-icon` : 'info-row-icon'}
+        source={icon}
+        style={styles.icon}
+        resizeMode="contain"
+      />
       <Text style={styles.text}>{children}</Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   row: {
     marginTop: 10,
     flexDirection: 'row',
@@ -32,6 +39,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     lineHeight: 15,
-    color: '#999999',
+    color: theme.colors.content.secondary,
   },
-});
+}));

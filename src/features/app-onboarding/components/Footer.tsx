@@ -18,16 +18,16 @@ export function Footer({ onSignIn }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   container: {
     alignItems: 'center',
   },
   text: {
     fontSize: 12,
-    color: '#000000',
+    color: theme.colors.content.primary,
     fontWeight: '400',
   },
   link: {
-    color: '#9E792E',
+    color: theme.colors.brand.primary,
   },
-});
+}));

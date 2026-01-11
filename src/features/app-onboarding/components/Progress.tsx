@@ -16,7 +16,7 @@ export function Progress({ index, total }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   container: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -25,11 +25,11 @@ const styles = StyleSheet.create({
   segment: {
     width: 10,
     height: 4,
-    backgroundColor: '#e5e5e5',
-    borderRadius: 4,
+    backgroundColor: theme.colors.border.subtle,
+    borderRadius: theme.radii.sm,
   },
   active: {
     width: 20,
-    backgroundColor: '#000',
+    backgroundColor: theme.colors.content.primary,
   },
-});
+}));

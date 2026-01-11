@@ -15,8 +15,21 @@ export function ProtectionCopy({ title, subtitle }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  body: { alignItems: 'center', gap: 8 },
-  title: { fontSize: 24, fontWeight: '500', textAlign: 'center' },
-  subtitle: { fontSize: 16, color: '#808080', textAlign: 'center', lineHeight: 22 },
-});
+const styles = StyleSheet.create((theme) => ({
+  body: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '500',
+    textAlign: 'center',
+    color: theme.colors.content.primary,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: theme.colors.content.secondary,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+}));

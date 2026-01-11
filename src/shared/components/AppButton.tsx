@@ -15,18 +15,18 @@ export function AppButton({ onPress, text, buttonStyle, textStyle, ...rest }: Pr
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   button: {
     width: '100%',
     height: 52,
-    borderRadius: 26,
-    backgroundColor: '#000000',
+    borderRadius: theme.radii.pill,
+    backgroundColor: theme.colors.button.primaryBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
   buttonText: {
-    color: '#ffffff',
+    color: theme.colors.button.primaryText,
     fontSize: 16,
     fontWeight: '600',
   },
-});
+}));

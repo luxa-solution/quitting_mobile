@@ -28,7 +28,7 @@ export function SignupButtonGroup({
       />
 
       <OAuthButton
-        testID="apple"
+        testID="continue-apple"
         variant="apple"
         text="Continue with Apple"
         onPress={onContinueApple}
@@ -36,7 +36,7 @@ export function SignupButtonGroup({
         textStyle={styles.buttonText}
       />
       <OAuthButton
-        testID="google"
+        testID="continue-google"
         variant="google"
         text="Continue with Google"
         onPress={onContinueGoogle}
@@ -47,16 +47,16 @@ export function SignupButtonGroup({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create((theme) => ({
   buttonGroups: {
     gap: 16,
     marginTop: 10,
   },
   button: {
-    borderRadius: 10,
+    borderRadius: theme.radii.md,
   },
   buttonText: {
     fontSize: 20,
     fontWeight: '400',
   },
-});
+}));
