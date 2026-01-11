@@ -4,7 +4,6 @@ import { Alert, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StyleSheet } from 'react-native-unistyles';
 
-import { registerMutation } from '../api';
 import {
   Header,
   PasswordRules,
@@ -30,16 +29,17 @@ export function SignupScreen() {
     password.length > 0 &&
     Object.values(rules).every(Boolean);
 
+  // TODO: We need a proper implementation of the sign up logic
   const handleCreateAccount = async () => {
     if (!canSubmit) return;
 
     try {
       setIsSubmitting(true);
 
-      await registerMutation({
-        email: email.trim(),
-        password,
-      });
+      // await registerMutation({
+      //   email: email.trim(),
+      //   password,
+      // });
 
       router.replace('/new-user-onboarding' as Href);
     } catch (e) {
@@ -49,6 +49,9 @@ export function SignupScreen() {
       setIsSubmitting(false);
     }
   };
+
+  const handleGoogleOAuth = () => router.replace('/new-user-onboarding' as Href);
+  const handleAppleOAuth = () => router.replace('/new-user-onboarding' as Href);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -70,8 +73,8 @@ export function SignupScreen() {
           <SignupButtonGroup
             canSubmit={canSubmit}
             onCreateAccount={handleCreateAccount}
-            onContinueApple={() => {}}
-            onContinueGoogle={() => {}}
+            onContinueApple={handleAppleOAuth}
+            onContinueGoogle={handleGoogleOAuth}
           />
         </View>
 
