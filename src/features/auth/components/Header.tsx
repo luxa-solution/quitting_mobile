@@ -8,7 +8,7 @@ export function Header({ title, onBack }: Props) {
   return (
     <View style={styles.container}>
       <Pressable testID="auth-back" accessibilityRole="button" onPress={onBack} style={styles.back}>
-        <Ionicons name="chevron-back" size={20} color="#111" />
+        <Ionicons name="chevron-back" size={20} color="#111111" />
       </Pressable>
       <View style={styles.textContainer}>
         <Text style={styles.title}>{title}</Text>
