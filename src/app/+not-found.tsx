@@ -34,6 +34,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   linkText: {
     fontSize: 14,
-    color: theme.colors.astral,
+    color: theme.colors.brand.primary,
   },
 }));
