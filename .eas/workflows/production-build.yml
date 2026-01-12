@@ -20,6 +20,8 @@ jobs:
     if: ${{ github.event.label.name == 'build-all' || github.event.label.name == 'build-android' }}
     type: build
     environment: production
+    env: 
+      EXPO_DEBUG: "1"
     params:
       platform: android
       profile: production
@@ -29,6 +31,8 @@ jobs:
   #   if: ${{ github.event.label.name == 'build-all' || github.event.label.name == 'build-ios' }}
   #   type: build
   #   environment: production
+  #   env: 
+  #     EXPO_DEBUG: "1"
   #   params:
   #     platform: ios
   #     profile: production
