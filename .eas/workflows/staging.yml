@@ -18,6 +18,8 @@ jobs:
     name: Compute fingerprint (Android/iOS)
     type: fingerprint
     environment: preview
+    env: 
+      EXPO_DEBUG: "1"
 
   # 1) Check if an Android build exists that matches this fingerprint runtime
   get_android_build:
@@ -36,6 +38,8 @@ jobs:
     if: ${{ needs.get_android_build.outputs.build_id }}
     type: update
     environment: preview
+    env: 
+      EXPO_DEBUG: "1"
     params:
       platform: android
       channel: preview
@@ -48,6 +52,8 @@ jobs:
     if: ${{ !needs.get_android_build.outputs.build_id }}
     type: build
     environment: preview
+    env: 
+      EXPO_DEBUG: "1"
     params:
       platform: android
       profile: preview
@@ -73,6 +79,8 @@ jobs:
   #   if: ${{ needs.get_ios_build.outputs.build_id }}
   #   type: update
   #   environment: preview
+  #   env: 
+  #     EXPO_DEBUG: "1"
   #   params:
   #     platform: ios
   #     channel: preview
@@ -85,6 +93,8 @@ jobs:
   #   if: ${{ !needs.get_ios_build.outputs.build_id }}
   #   type: build
   #   environment: preview
+  #   env: 
+  #     EXPO_DEBUG: "1"
   #   params:
   #     platform: ios
   #     profile: preview
