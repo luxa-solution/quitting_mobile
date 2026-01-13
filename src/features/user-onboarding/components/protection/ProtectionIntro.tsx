@@ -17,7 +17,7 @@ export function ProtectionIntro() {
       <ProtectionShield size={316} />
 
       <ProtectionCopy
-        title={'Let’s protect you from\ntemptation.'}
+        title={"Let's protect you from\ntemptation."}
         subtitle="Quitting can help you stay safe by gently blocking access to harmful websites and showing reminders when you need them most."
       />
 
