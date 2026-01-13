@@ -61,6 +61,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.content.secondary,
     fontWeight: '400',
     lineHeight: 22,
+    width: '90%',
   },
   textSelected: {
     color: theme.colors.content.primary,
