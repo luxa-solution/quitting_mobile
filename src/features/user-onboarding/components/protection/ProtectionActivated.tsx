@@ -11,7 +11,7 @@ export function ProtectionActivated() {
     <ProtectionLayout>
       <ProtectionCopy
         title="Protection activated"
-        subtitle="You’re now protected. When you try to access adult content, Quitting will gently intervene to help you pause, reflect, and regain control."
+        subtitle="You're now protected. When you try to access adult content, Quitting will gently intervene to help you pause, reflect, and regain control."
       />
 
       <ProtectionShield size={316} />
